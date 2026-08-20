@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conferência de Bonificação</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --ink:#1B2430; --paper:#F6F4EF; --lens:#2F6F80; --lens-bright:#48A0B5;
+    --amber:#D98E3B; --line:#DAD5C8; --ink-soft:#63707F; --error:#B5502E;
+    --ok:#3C8462; --card:#FFFFFF;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--paper);font-family:'Inter',sans-serif;color:var(--ink);}
+  .cbf-root{max-width:720px;margin:0 auto;min-height:100vh;}
+  .cbf-header{
+    background:var(--ink); color:var(--paper); padding:20px 24px 18px;
+    display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:12px;
+    position:sticky; top:0; z-index:10;
+  }
+  .cbf-title{font-family:'Fraunces',serif;font-weight:600;font-size:22px;letter-spacing:0.2px;}
+  .cbf-title small{display:block;font-family:'Inter',sans-serif;font-weight:400;font-size:12px;color:#B7C4CE;margin-top:4px;text-transform:uppercase;letter-spacing:1.2px;}
+  .cbf-tabs{display:flex;gap:6px;background:rgba(255,255,255,0.08);padding:4px;border-radius:999px;}
+  .cbf-tab{border:none;background:transparent;color:#C9D3DA;padding:8px 16px;border-radius:999px;font-family:'Inter',sans-serif;font-weight:600;font-size:13px;cursor:pointer;transition:all .2s ease;}
+  .cbf-tab.active{background:var(--amber);color:var(--ink);}
+  .cbf-body{padding:22px 24px 40px;}
+  @media(max-width:640px){ .cbf-body{padding:16px;} .cbf-header{padding:16px;} }
+  .cbf-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .cbf-card h3{margin:0 0 4px;font-family:'Fraunces',serif;font-size:16px;font-weight:600;color:var(--ink);}
+  .cbf-label{font-size:12px;text-transform:uppercase;letter-spacing:0.8px;color:var(--ink-soft);font-weight:600;margin-bottom:6px;display:block;}
+  select, input[type=text], input[type=password], input[type=number], textarea{
+    width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+    font-family:'Inter',sans-serif;font-size:14px;background:#FCFBF8;color:var(--ink);
+  }
+  textarea{font-family:'IBM Plex Mono',monospace;font-size:12.5px;min-height:90px;resize:vertical;}
+  select:focus, input:focus, textarea:focus{outline:2px solid var(--lens-bright);outline-offset:1px;}
+  .cbf-btn{border:none;border-radius:8px;padding:10px 18px;font-weight:600;font-size:13.5px;cursor:pointer;font-family:'Inter',sans-serif;transition:transform .12s ease, opacity .12s ease;}
+  .cbf-btn:active{transform:scale(0.97);}
+  .cbf-btn-primary{background:var(--lens);color:#fff;}
+  .cbf-btn-primary:hover{background:var(--lens-bright);}
+  .cbf-btn-amber{background:var(--amber);color:var(--ink);}
+  .cbf-btn-ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--line);}
+  .cbf-btn-danger{background:transparent;color:var(--error);border:1px solid var(--error);}
+  .cbf-btn[disabled]{opacity:0.5;cursor:not-allowed;}
+  .cbf-lens-wrap{display:flex;align-items:center;gap:16px;margin:12px 0 8px;}
+  .cbf-lens{width:52px;height:52px;border-radius:50%;flex:none;border:3px solid var(--line);display:flex;align-items:center;justify-content:center;position:relative;transition:border-color .35s ease, box-shadow .35s ease;}
+  .cbf-lens::after{content:'';width:16px;height:16px;border-radius:50%;background:var(--line);transition:background .35s ease;}
+  .cbf-lens.ok{border-color:var(--ok);box-shadow:0 0 0 6px rgba(60,132,98,0.12);}
+  .cbf-lens.ok::after{background:var(--ok);}
+  .cbf-lens.warn{border-color:var(--amber);box-shadow:0 0 0 6px rgba(217,142,59,0.14);}
+  .cbf-lens.warn::after{background:var(--amber);}
+  .cbf-lens.err{border-color:var(--error);box-shadow:0 0 0 6px rgba(181,80,46,0.12);}
+  .cbf-lens.err::after{background:var(--error);}
+  .cbf-lens.pulse{animation:cbfPulse .5s ease;}
+  @keyframes cbfPulse{0%{transform:scale(1);}45%{transform:scale(1.12);}100%{transform:scale(1);}}
+  .cbf-seq-row{display:flex;gap:10px;flex:1;flex-wrap:wrap;}
+  .cbf-seq-row input{flex:1;min-width:140px;font-family:'IBM Plex Mono',monospace;font-size:15px;letter-spacing:0.5px;}
+  .cbf-result{min-height:20px;font-size:13px;margin-bottom:2px;}
+  .cbf-result.ok{color:var(--ok);}
+  .cbf-result.err{color:var(--error);}
+  .cbf-result.warn{color:var(--amber);}
+  .cbf-total{font-family:'Fraunces',serif;font-weight:700;font-size:26px;color:var(--ink);}
+  .cbf-total.big{font-size:32px;}
+  .cbf-total small{font-family:'Inter',sans-serif;font-size:11px;font-weight:600;color:var(--ink-soft);display:block;text-transform:uppercase;letter-spacing:1px;}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:0.6px;color:var(--ink-soft);padding:6px 8px;border-bottom:1px solid var(--line);}
+  td{padding:6px 8px;border-bottom:1px solid #EDEAE1;font-family:'IBM Plex Mono',monospace;font-size:12px;}
+  td.mono-name{font-family:'Inter',sans-serif;}
+  tr:last-child td{border-bottom:none;}
+  .cbf-empty{color:var(--ink-soft);font-size:12.5px;padding:10px 2px;}
+  .cbf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:640px){.cbf-grid2{grid-template-columns:1fr;}}
+  .cbf-pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:600;background:#EFEBE0;color:var(--ink-soft);white-space:nowrap;}
+  .cbf-pill-ok{background:#DFEEE5;color:var(--ok);}
+  .cbf-pill-warn{background:#F5E7D4;color:#95611E;}
+  .cbf-pill-err{background:#F3DFD7;color:var(--error);}
+  .cbf-hint{font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.5;}
+  .cbf-locked{padding:40px 10px;text-align:center;}
+  .cbf-flex-between{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+  .cbf-pending-note{font-size:12px;color:var(--amber);font-weight:600;margin-top:6px;}
+  .cbf-eyebrow{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--lens);text-transform:uppercase;}
+  .cbf-badge-code{display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 9px;border-radius:6px;letter-spacing:0.5px;}
+  .cbf-welcome{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+  .cbf-welcome-name{font-family:'Fraunces',serif;font-weight:600;font-size:17px;}
+</style>
+</head>
+<body>
+<div class="cbf-root" id="cbfRoot">
+  <div class="cbf-header">
+    <div class="cbf-title">Conferência de Bonificação
+      <small id="cbfMonthLabel">carregando...</small>
+    </div>
+    <div class="cbf-tabs">
+      <button class="cbf-tab active" data-tab="vendedor" id="tabVendedor">Vendedor</button>
+      <button class="cbf-tab" data-tab="admin" id="tabAdmin">Admin</button>
+    </div>
+  </div>
+  <div class="cbf-body" id="cbfBody"><div class="cbf-card cbf-locked">Carregando…</div></div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// ======= CONFIGURE AQUI =======
+const SUPABASE_URL = "https://wtdgdqbzvzvlimsweuth.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind0ZGdkcWJ6dnp2bGltc3dldXRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNTgxNDIsImV4cCI6MjEwMjgzNDE0Mn0.1HH9dingjahxDGmHu0vMqGIAHWB7vYlGRAV0RUJh5DU";
+// ================================
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const ADMIN_PASSWORD = "6482";
+
+const CATS = {
+  lentes: { label: 'Vendas de Lentes', num: 1 },
+  baleia: { label: 'Armações Baleias', num: 2 },
+  cf: { label: 'Vendas CF', num: 3 }
+};
+
+let state = {
+  sellers: [], refVendas: [], refCF: [], bonusSku: [], bonusMarca: [], baleiaEspeciais: [],
+  settings: { descontoMax: 10, valorCF: 10, valorBaleiaEspecial: 10 },
+  entries: [],
+  currentTab: 'vendedor',
+  currentSellerCode: '',
+  adminUnlocked: false,
+  adminStatus: '',
+  refDataLoaded: false
+};
+
+let lastError = '';
+
+const root = document.getElementById('cbfBody');
+const monthLabel = document.getElementById('cbfMonthLabel');
+const now = new Date();
+monthLabel.textContent = now.toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+
+// ---------- supabase helpers ----------
+async function fetchAllRows(table, orderCol){
+  let all = [];
+  let from = 0;
+  const pageSize = 1000;
+  while(true){
+    let query = supabase.from(table).select('*').range(from, from+pageSize-1);
+    if(orderCol) query = query.order(orderCol, {ascending:true});
+    const { data, error } = await query;
+    if(error){ lastError = error.message; console.error(table, error); break; }
+    all = all.concat(data||[]);
+    if(!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+async function deleteAll(table, pkCol){
+  const { error } = await supabase.from(table).delete().not(pkCol, 'is', null);
+  if(error){ lastError = error.message; return false; }
+  return true;
+}
+
+async function batchInsert(table, rows, batchSize){
+  for(let i=0;i<rows.length;i+=batchSize){
+    const batch = rows.slice(i, i+batchSize);
+    const { error } = await supabase.from(table).insert(batch);
+    if(error){ lastError = error.message; console.error(table, error); return false; }
+  }
+  return true;
+}
+
+async function batchUpsert(table, rows, pkCol, batchSize){
+  for(let i=0;i<rows.length;i+=batchSize){
+    const batch = rows.slice(i, i+batchSize);
+    const { error } = await supabase.from(table).upsert(batch, {onConflict:pkCol});
+    if(error){ lastError = error.message; console.error(table, error); return false; }
+  }
+  return true;
+}
+
+async function replaceTable(table, pkCol, rows, batchSize){
+  const ok1 = await deleteAll(table, pkCol);
+  if(!ok1) return false;
+  if(rows.length===0) return true;
+  return await batchInsert(table, rows, batchSize);
+}
+
+async function loadReferenceData(){
+  state.sellers = await fetchAllRows('sellers');
+  state.refVendas = await fetchAllRows('ref_vendas');
+  state.refCF = await fetchAllRows('ref_cf', 'ordem');
+  state.bonusSku = await fetchAllRows('bonus_sku');
+  state.bonusMarca = await fetchAllRows('bonus_marca');
+  state.baleiaEspeciais = await fetchAllRows('baleia_especiais');
+  const { data: settingsRows, error } = await supabase.from('settings').select('*').eq('id',1).limit(1);
+  if(!error && settingsRows && settingsRows[0]){
+    state.settings = { descontoMax: Number(settingsRows[0].desconto_max), valorCF: Number(settingsRows[0].valor_cf), valorBaleiaEspecial: Number(settingsRows[0].valor_baleia_especial||10) };
+  }
+  state.refDataLoaded = true;
+}
+
+async function loadEntries(){
+  state.entries = await fetchAllRows('entries');
+}
+
+// ---------- utils ----------
+function norm(s){ return (s||'').toString().trim().toLowerCase(); }
+function parseValor(str){
+  if(str===undefined||str===null) return 0;
+  let s = str.toString().replace(/[^\d,.-]/g,'');
+  if(s.includes(',') && s.includes('.')){ s = s.replace(/\./g,'').replace(',', '.'); }
+  else if(s.includes(',')){ s = s.replace(',', '.'); }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function fmtBRL(n){ return (n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function splitLine(line){
+  const delim = line.includes(';') ? ';' : (line.includes('\t') ? '\t' : ',');
+  return line.split(delim).map(c=>c.trim().replace(/^"|"$/g,''));
+}
+function toLines(text){
+  return (text||'').split('\n').map(l=>l.replace(/\r$/,'')).filter(l=>l.trim().length>0);
+}
+function isHeaderRow(cols){
+  const j = norm(cols.join(' '));
+  return j.includes('seq') || j.includes('vendedor') || j.includes('codigo') || j.includes('código') || j.includes('marca') || j.includes('valor') || j.includes('nome') || j.includes('qtde') || j.includes('desconto');
+}
+function nomeDoVendedor(codigo){
+  const s = state.sellers.find(x => norm(x.codigo) === norm(codigo));
+  return s ? s.nome : ('Código ' + codigo);
+}
+
+function parseRefVendas(text){
+  return toLines(text).filter(l=>{const c=splitLine(l); return !isHeaderRow(c);}).map(l=>{
+    const c = splitLine(l);
+    return { seq:(c[0]||'').trim(), vcodigo:(c[1]||'').trim(), produto:(c[2]||'').trim(), descricao:(c[3]||'').trim(), pct: parseValor(c[4]) };
+  }).filter(r=>r.seq);
+}
+function parseRefCF(text){
+  return toLines(text).filter(l=>{const c=splitLine(l); return !isHeaderRow(c);}).map((l,i)=>{
+    const c = splitLine(l);
+    return { ordem:i, seq:(c[0]||'').trim(), vcodigo:(c[1]||'').trim(), produto:(c[2]||'').trim(), qtde: parseValor(c[3]) };
+  }).filter(r=>r.seq);
+}
+function parseBonusSku(text){
+  return toLines(text).filter(l=>{const c=splitLine(l); return !isHeaderRow(c);}).map(l=>{
+    const c = splitLine(l);
+    return { codigo:(c[0]||'').trim(), valor: parseValor(c[1]) };
+  }).filter(r=>r.codigo);
+}
+function parseBonusMarca(text){
+  return toLines(text).filter(l=>{const c=splitLine(l); return !isHeaderRow(c);}).map(l=>{
+    const c = splitLine(l);
+    return { marca:(c[0]||'').trim(), valor: parseValor(c[1]!==undefined?c[1]:'5,00') };
+  }).filter(r=>r.marca);
+}
+function parseSellers(text){
+  const seen = new Set();
+  return toLines(text).filter(l=>{const c=splitLine(l); return !isHeaderRow(c);}).map(l=>{
+    const c = splitLine(l);
+    return { codigo:(c[0]||'').trim(), nome:(c[1]||'').trim() };
+  }).filter(r=>{
+    if(!r.codigo || seen.has(norm(r.codigo))) return false;
+    seen.add(norm(r.codigo)); return true;
+  });
+}
+
+// ---------- lookups ----------
+function lookupLentes(seq, codigo){
+  const rows = state.refVendas.filter(r => norm(r.seq) === norm(seq));
+  if(rows.length === 0) return { status:'pending', detalhes:[], total:0, note:'' };
+  const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
+  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.' };
+  const detalhes = []; const notes = [];
+  own.forEach(r=>{
+    const bs = state.bonusSku.find(b => norm(b.codigo) === norm(r.produto));
+    if(bs){
+      const pct = parseValor(r.pct);
+      if(pct <= state.settings.descontoMax + 1e-9){
+        detalhes.push({ ref: r.produto + ' — ' + r.descricao, valor: Number(bs.valor) });
+      } else {
+        notes.push('Desconto de ' + pct.toFixed(2).replace('.',',') + '% no SKU ' + r.produto + ' passou do limite de ' + state.settings.descontoMax + '%.');
+      }
+    }
+  });
+  if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note: notes.join(' ') };
+  if(notes.length > 0) return { status:'no_bonus', detalhes:[], total:0, note: notes.join(' ') };
+  return { status:'no_bonus', detalhes:[], total:0, note:'' };
+}
+
+function lookupBaleia(seq, codigo){
+  const rows = state.refVendas.filter(r => norm(r.seq) === norm(seq));
+  if(rows.length === 0) return { status:'pending', detalhes:[], total:0, note:'' };
+  const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
+  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.' };
+  const isEspecial = state.baleiaEspeciais.some(x => norm(x.vcodigo) === norm(codigo));
+  const detalhes = [];
+  own.forEach(r=>{
+    state.bonusMarca.forEach(b=>{
+      if(b.marca && norm(r.descricao).includes(norm(b.marca))){
+        const valor = isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(b.valor);
+        detalhes.push({ ref: b.marca + ' (' + r.produto + ')' + (isEspecial ? ' · especial' : ''), valor });
+      }
+    });
+  });
+  if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note:'' };
+  return { status:'no_bonus', detalhes:[], total:0, note:'' };
+}
+
+function lookupCF(seq, codigo){
+  const rows = state.refCF.filter(r => norm(r.seq) === norm(seq)).sort((a,b)=>a.ordem-b.ordem);
+  if(rows.length === 0) return { status:'pending', detalhes:[], total:0, note:'' };
+  const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
+  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.' };
+  let pendingFrame = false; let pairedQtde = 0; let pares = 0;
+  own.forEach(r=>{
+    const isLens = (r.produto||'').toUpperCase().startsWith('LSA');
+    if(!isLens){ pendingFrame = true; }
+    else if(pendingFrame){ pairedQtde += parseValor(r.qtde); pares++; pendingFrame = false; }
+  });
+  if(pairedQtde <= 0) return { status:'no_bonus', detalhes:[], total:0, note:'' };
+  const total = pairedQtde * state.settings.valorCF;
+  return { status:'resolved', detalhes:[{ ref: pairedQtde + ' lente(s) em ' + pares + ' par(es) com armação', valor: total }], total, note:'' };
+}
+
+function recomputeEntry(e){
+  let r;
+  if(e.tipo === 'lentes') r = lookupLentes(e.seq, e.vcodigo);
+  else if(e.tipo === 'baleia') r = lookupBaleia(e.seq, e.vcodigo);
+  else r = lookupCF(e.seq, e.vcodigo);
+  e.status = r.status; e.detalhes = r.detalhes; e.total = r.total; e.note = r.note;
+  return e;
+}
+
+async function reconcileAll(){
+  await loadEntries();
+  state.entries = state.entries.map(e => recomputeEntry(e));
+  await batchUpsert('entries', state.entries, 'id', 500);
+}
+
+function statusLabel(status){
+  switch(status){
+    case 'resolved': return {text:'Confirmada', cls:'cbf-pill-ok'};
+    case 'pending': return {text:'Aguardando relatório', cls:'cbf-pill-warn'};
+    case 'rejected': return {text:'Não pertence a você', cls:'cbf-pill-err'};
+    case 'no_bonus': return {text:'Sem bonificação', cls:''};
+    default: return {text:status||'—', cls:''};
+  }
+}
+function dateStr(ts){ return new Date(ts).toLocaleDateString('pt-BR'); }
+function escHtml(s){ const d=document.createElement('div'); d.textContent=s??''; return d.innerHTML; }
+function escAttr(s){ return (s??'').toString().replace(/"/g,'&quot;'); }
+
+// ---------- render ----------
+function render(){
+  document.getElementById('tabVendedor').classList.toggle('active', state.currentTab==='vendedor');
+  document.getElementById('tabAdmin').classList.toggle('active', state.currentTab==='admin');
+  root.innerHTML = state.currentTab === 'vendedor' ? renderVendedor() : renderAdmin();
+  attachHandlers();
+}
+
+function categoryHint(tipo){
+  if(tipo==='lentes') return 'Paga o valor da tabela por SKU se o desconto da lente não passar de ' + state.settings.descontoMax + '%.';
+  if(tipo==='baleia') return 'Paga o valor cadastrado por cada armação de marca "baleia" encontrada na SEQ.';
+  return 'Paga ' + fmtBRL(state.settings.valorCF) + ' por lente, só quando vem pareada com uma armação (óculos completo).';
+}
+
+function renderCategoryCard(tipo){
+  const meta = CATS[tipo];
+  const myCode = state.currentSellerCode;
+  const myEntries = state.entries.filter(e => e.tipo===tipo && norm(e.vcodigo) === norm(myCode)).sort((a,b)=>b.ts-a.ts);
+  const subtotal = myEntries.reduce((s,e)=>s+Number(e.total),0);
+  const pendingCount = myEntries.filter(e=>e.status==='pending').length;
+
+  const rows = myEntries.length ? myEntries.map(e=>{
+    const st = statusLabel(e.status);
+    return `<tr><td>${escHtml(e.seq)}</td><td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span></td><td>${fmtBRL(e.total)}</td><td class="mono-name">${dateStr(e.ts)}</td></tr>`;
+  }).join('') : `<tr><td colspan="4" class="cbf-empty">Nenhuma SEQ lançada ainda.</td></tr>`;
+
+  return `
+    <div class="cbf-card">
+      <div class="cbf-eyebrow">${meta.num} · ${meta.label}</div>
+      <div class="cbf-hint">${categoryHint(tipo)}</div>
+      <div class="cbf-lens-wrap">
+        <div class="cbf-lens" id="lensRing-${tipo}"></div>
+        <div class="cbf-seq-row">
+          <input type="text" id="seqInput-${tipo}" placeholder="Digite a SEQ e aperte Enter" autocomplete="off">
+          <button class="cbf-btn cbf-btn-primary" id="seqBtn-${tipo}">Conferir</button>
+        </div>
+      </div>
+      <div class="cbf-result" id="seqResult-${tipo}"></div>
+      ${pendingCount ? `<div class="cbf-pending-note">${pendingCount} aguardando relatório.</div>` : ''}
+      <div class="cbf-flex-between" style="margin-top:10px;">
+        <span class="cbf-label" style="margin:0;">Lançamentos</span>
+        <div class="cbf-total"><small>Subtotal</small>${fmtBRL(subtotal)}</div>
+      </div>
+      <table><thead><tr><th>SEQ</th><th>Status</th><th>Valor</th><th>Data</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>
+  `;
+}
+
+function renderVendedor(){
+  if(!state.currentSellerCode){
+    return `
+      <div class="cbf-card cbf-locked">
+        <h3>Identifique-se</h3>
+        <p class="cbf-hint">Digite seu código de vendedor (o mesmo do ponto).</p>
+        <div style="max-width:220px;margin:12px auto 0;display:flex;gap:8px;">
+          <input type="text" id="sellerCodeInput" placeholder="Código" autocomplete="off">
+          <button class="cbf-btn cbf-btn-primary" id="sellerCodeBtn">Entrar</button>
+        </div>
+        <div class="cbf-result err" id="sellerCodeErr"></div>
+      </div>`;
+  }
+  const nome = nomeDoVendedor(state.currentSellerCode);
+  const myAll = state.entries.filter(e => norm(e.vcodigo) === norm(state.currentSellerCode));
+  const grandTotal = myAll.reduce((s,e)=>s+Number(e.total),0);
+
+  return `
+    <div class="cbf-card">
+      <div class="cbf-welcome">
+        <div>
+          <span class="cbf-label" style="margin:0;">Vendedor</span>
+          <div class="cbf-welcome-name">${escHtml(nome)} <span class="cbf-badge-code">${escHtml(state.currentSellerCode)}</span></div>
+        </div>
+        <button class="cbf-btn cbf-btn-ghost" id="trocarVendedorBtn">Trocar</button>
+      </div>
+    </div>
+    ${renderCategoryCard('lentes')}
+    ${renderCategoryCard('baleia')}
+    ${renderCategoryCard('cf')}
+    <div class="cbf-card">
+      <div class="cbf-flex-between" style="margin:0;">
+        <h3 style="margin:0;">Total do mês</h3>
+        <div class="cbf-total big"><small>Confirmado</small>${fmtBRL(grandTotal)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdmin(){
+  if(!state.adminUnlocked){
+    return `
+      <div class="cbf-card cbf-locked">
+        <h3>Área restrita</h3>
+        <p class="cbf-hint">Digite a senha de admin para gerenciar dados e ver os totais.</p>
+        <div style="max-width:260px;margin:12px auto 0;display:flex;gap:8px;">
+          <input type="password" id="adminPass" placeholder="Senha">
+          <button class="cbf-btn cbf-btn-primary" id="adminUnlockBtn">Entrar</button>
+        </div>
+        <div class="cbf-result err" id="adminErr"></div>
+      </div>`;
+  }
+
+  const totals = {};
+  state.entries.forEach(e=>{ totals[e.vcodigo] = (totals[e.vcodigo]||0) + Number(e.total); });
+  const grand = Object.values(totals).reduce((a,b)=>a+b,0);
+  const pendingCount = state.entries.filter(e=>e.status==='pending').length;
+  const totalRows = Object.keys(totals).sort((a,b)=>totals[b]-totals[a]).map(code=>`
+    <tr><td class="mono-name">${escHtml(nomeDoVendedor(code))} <span class="cbf-hint">${escHtml(code)}</span></td><td>${fmtBRL(totals[code])}</td></tr>
+  `).join('') || `<tr><td colspan="2" class="cbf-empty">Sem lançamentos ainda.</td></tr>`;
+
+  const logRows = [...state.entries].sort((a,b)=>b.ts-a.ts).slice(0,500).map(e=>{
+    const st = statusLabel(e.status);
+    return `<tr>
+      <td class="mono-name">${escHtml(nomeDoVendedor(e.vcodigo))}</td>
+      <td class="mono-name">${CATS[e.tipo] ? CATS[e.tipo].num : ''}</td>
+      <td>${escHtml(e.seq)}</td>
+      <td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span> ${escHtml((e.detalhes||[]).map(d=>d.ref).join(' | '))}</td>
+      <td>${fmtBRL(e.total)}</td>
+      <td class="mono-name">${dateStr(e.ts)}</td>
+      <td><button class="cbf-btn cbf-btn-danger" data-del="${escAttr(e.id)}" style="padding:4px 10px;font-size:11px;">Excluir</button></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="7" class="cbf-empty">Sem lançamentos ainda.</td></tr>`;
+
+  return `
+    <div class="cbf-card">
+      ${state.adminStatus ? `<div class="cbf-result ${state.adminStatus.startsWith('✓')?'ok':'err'}" style="margin-bottom:8px;">${escHtml(state.adminStatus)}</div>` : ''}
+      <div class="cbf-flex-between">
+        <h3 style="margin:0;">Totais do mês</h3>
+        <div class="cbf-total"><small>Total confirmado</small>${fmtBRL(grand)}</div>
+      </div>
+      ${pendingCount ? `<div class="cbf-pending-note">${pendingCount} lançamento(s) aguardando relatório em todo o time.</div>` : ''}
+      <table><thead><tr><th>Vendedor</th><th>Total</th></tr></thead><tbody>${totalRows}</tbody></table>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="cbf-btn cbf-btn-ghost" id="reloadBtn">Recarregar dados</button>
+        <button class="cbf-btn cbf-btn-ghost" id="reconcileBtn">Reprocessar pendentes agora</button>
+        <button class="cbf-btn cbf-btn-amber" id="exportBtn">Exportar CSV</button>
+        <button class="cbf-btn cbf-btn-danger" id="closeMonthBtn">Fechar mês (arquiva e zera lançamentos)</button>
+      </div>
+    </div>
+
+    <div class="cbf-grid2">
+      <div class="cbf-card">
+        <h3>Configurações</h3>
+        <label class="cbf-label">Desconto máximo na lente (%) — categoria 1</label>
+        <input type="number" step="0.1" id="descontoMaxInput" value="${state.settings.descontoMax}">
+        <div style="height:10px;"></div>
+        <label class="cbf-label">Valor por lente na Vendas CF (R$) — categoria 3</label>
+        <input type="number" step="0.01" id="valorCFInput" value="${state.settings.valorCF}">
+        <div style="height:10px;"></div>
+        <label class="cbf-label">Valor especial Armações Baleias (R$) — categoria 2</label>
+        <input type="number" step="0.01" id="valorBaleiaEspecialInput" value="${state.settings.valorBaleiaEspecial}">
+        <div style="margin-top:10px;"><button class="cbf-btn cbf-btn-primary" id="saveSettingsBtn">Salvar configurações</button></div>
+      </div>
+      <div class="cbf-card">
+        <h3>Vendedores especiais <span class="cbf-hint">(recebem o valor especial em Armações Baleias)</span></h3>
+        <label class="cbf-label">código do vendedor, um por linha</label>
+        <textarea id="baleiaEspeciaisText" style="min-height:60px;">${escHtml(state.baleiaEspeciais.map(x=>x.vcodigo).join('\n'))}</textarea>
+        <div class="cbf-hint">${state.baleiaEspeciais.length} vendedor(es) especial(is)</div>
+        <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="baleiaEspeciais">Salvar</button></div>
+      </div>
+      <div class="cbf-card">
+        <h3>Vendedores cadastrados</h3>
+        <label class="cbf-label">codigo;nome (um por linha — o código é o mesmo do ponto)</label>
+        <textarea id="sellersText">${escHtml(state.sellers.map(s=>s.codigo+';'+s.nome).join('\n'))}</textarea>
+        <div class="cbf-hint">${state.sellers.length} vendedores carregados</div>
+        <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="sellers">Salvar vendedores</button></div>
+      </div>
+    </div>
+
+    <div class="cbf-grid2">
+      <div class="cbf-card">
+        <h3>Relatório de Vendas <span class="cbf-hint">(categorias 1 e 2)</span></h3>
+        <label class="cbf-label">seq;codigo_vendedor;codigo_produto;descricao;desconto% (um por linha)</label>
+        <textarea id="refVendasText">${escHtml(state.refVendas.map(r=>[r.seq,r.vcodigo,r.produto,r.descricao,r.pct].join(';')).join('\n'))}</textarea>
+        <div class="cbf-hint">${state.refVendas.length} registros carregados</div>
+        <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="refVendas">Salvar</button></div>
+      </div>
+      <div class="cbf-card">
+        <h3>Relatório de Vendas CF <span class="cbf-hint">(categoria 3)</span></h3>
+        <label class="cbf-label">seq;codigo_vendedor;codigo_produto;qtde — mantenha a ordem original das linhas</label>
+        <textarea id="refCFText">${escHtml(state.refCF.map(r=>[r.seq,r.vcodigo,r.produto,r.qtde].join(';')).join('\n'))}</textarea>
+        <div class="cbf-hint">${state.refCF.length} registros carregados</div>
+        <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="refCF">Salvar</button></div>
+      </div>
+      <div class="cbf-card">
+        <h3>Bonificação por SKU <span class="cbf-hint">(categoria 1)</span></h3>
+        <label class="cbf-label">codigo;valor</label>
+        <textarea id="bonusSkuText">${escHtml(state.bonusSku.map(r=>[r.codigo,Number(r.valor).toFixed(2).replace('.',',')].join(';')).join('\n'))}</textarea>
+        <div class="cbf-hint">${state.bonusSku.length} registros carregados</div>
+        <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="bonusSku">Salvar</button></div>
+      </div>
+      <div class="cbf-card">
+        <h3>Marcas Armações Baleias <span class="cbf-hint">(categoria 2)</span></h3>
+        <label class="cbf-label">marca;valor (texto que aparece na descrição do produto)</label>
+        <textarea id="bonusMarcaText">${escHtml(state.bonusMarca.map(r=>[r.marca,Number(r.valor).toFixed(2).replace('.',',')].join(';')).join('\n'))}</textarea>
+        <div class="cbf-hint">${state.bonusMarca.length} registros carregados</div>
+        <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="bonusMarca">Salvar</button></div>
+      </div>
+    </div>
+
+    <div class="cbf-card">
+      <h3>Últimos lançamentos <span class="cbf-hint">(mais recentes primeiro, até 500)</span></h3>
+      <table><thead><tr><th>Vendedor</th><th>Cat.</th><th>SEQ</th><th>Status</th><th>Valor</th><th>Data</th><th></th></tr></thead><tbody>${logRows}</tbody></table>
+    </div>
+  `;
+}
+
+// ---------- handlers ----------
+function attachHandlers(){
+  document.getElementById('tabVendedor').onclick = ()=>{ state.currentTab='vendedor'; render(); };
+  document.getElementById('tabAdmin').onclick = async ()=>{
+    state.currentTab='admin';
+    if(state.adminUnlocked) await loadEntries();
+    render();
+  };
+
+  if(state.currentTab==='vendedor'){
+    if(!state.currentSellerCode){
+      const inp = document.getElementById('sellerCodeInput');
+      const btn = document.getElementById('sellerCodeBtn');
+      const tryEnter = async ()=>{
+        const code = (inp.value||'').trim();
+        if(!code) return;
+        const found = state.sellers.find(s => norm(s.codigo) === norm(code));
+        if(found){ state.currentSellerCode = found.codigo; await loadEntries(); render(); }
+        else{ document.getElementById('sellerCodeErr').textContent = 'Código não encontrado. Confira com o admin.'; }
+      };
+      if(btn) btn.onclick = tryEnter;
+      if(inp){ inp.onkeydown = (ev)=>{ if(ev.key==='Enter') tryEnter(); }; inp.focus(); }
+      return;
+    }
+    const trocar = document.getElementById('trocarVendedorBtn');
+    if(trocar) trocar.onclick = ()=>{ state.currentSellerCode=''; render(); };
+    Object.keys(CATS).forEach(tipo=>{
+      const input = document.getElementById('seqInput-'+tipo);
+      const btn = document.getElementById('seqBtn-'+tipo);
+      const submit = ()=> submitSeq(tipo);
+      if(btn) btn.onclick = submit;
+      if(input) input.onkeydown = (ev)=>{ if(ev.key==='Enter') submit(); };
+    });
+  } else {
+    if(!state.adminUnlocked){
+      const btn = document.getElementById('adminUnlockBtn');
+      const inp = document.getElementById('adminPass');
+      const tryUnlock = async ()=>{
+        if(inp.value.trim() === ADMIN_PASSWORD){ state.adminUnlocked = true; await loadEntries(); render(); }
+        else{ document.getElementById('adminErr').textContent = 'Senha incorreta.'; }
+      };
+      if(btn) btn.onclick = tryUnlock;
+      if(inp) inp.onkeydown = (ev)=>{ if(ev.key==='Enter') tryUnlock(); };
+    } else {
+      document.querySelectorAll('[data-save]').forEach(b=>{ b.onclick = ()=> saveAdminField(b.getAttribute('data-save')); });
+      document.querySelectorAll('[data-del]').forEach(b=>{ b.onclick = ()=> deleteEntry(b.getAttribute('data-del')); });
+      const reloadBtn = document.getElementById('reloadBtn');
+      if(reloadBtn) reloadBtn.onclick = async ()=>{ state.adminStatus='Recarregando...'; render(); await loadReferenceData(); await loadEntries(); state.adminStatus='✓ Dados recarregados.'; render(); };
+      const recBtn = document.getElementById('reconcileBtn');
+      if(recBtn) recBtn.onclick = async ()=>{ state.adminStatus='Reprocessando...'; render(); await reconcileAll(); state.adminStatus='✓ Pendentes reprocessadas.'; render(); };
+      const exp = document.getElementById('exportBtn');
+      if(exp) exp.onclick = exportCSV;
+      const close = document.getElementById('closeMonthBtn');
+      if(close) close.onclick = closeMonth;
+      const saveSettings = document.getElementById('saveSettingsBtn');
+      if(saveSettings) saveSettings.onclick = async ()=>{
+        state.settings.descontoMax = parseValor(document.getElementById('descontoMaxInput').value) || 0;
+        state.settings.valorCF = parseValor(document.getElementById('valorCFInput').value) || 0;
+        state.settings.valorBaleiaEspecial = parseValor(document.getElementById('valorBaleiaEspecialInput').value) || 0;
+        const { error } = await supabase.from('settings').update({desconto_max: state.settings.descontoMax, valor_cf: state.settings.valorCF, valor_baleia_especial: state.settings.valorBaleiaEspecial}).eq('id',1);
+        if(error){ lastError = error.message; state.adminStatus = '✗ Falha ao salvar configurações. Detalhe: ' + lastError; }
+        else{ await reconcileAll(); state.adminStatus = '✓ Configurações salvas.'; }
+        render();
+      };
+    }
+  }
+}
+
+async function submitSeq(tipo){
+  const input = document.getElementById('seqInput-'+tipo);
+  const resultEl = document.getElementById('seqResult-'+tipo);
+  const lens = document.getElementById('lensRing-'+tipo);
+  const seq = (input.value||'').trim();
+  if(!seq) return;
+
+  await loadEntries();
+
+  lens.classList.remove('ok','warn','err');
+  void lens.offsetWidth;
+  lens.classList.add('pulse');
+  setTimeout(()=>lens.classList.remove('pulse'), 500);
+
+  const lensClassFor = (status)=> status==='resolved' ? 'ok' : (status==='rejected' ? 'err' : 'warn');
+  const messageFor = (e)=>{
+    switch(e.status){
+      case 'resolved': return fmtBRL(e.total) + ' — ' + (e.detalhes||[]).map(d=>d.ref).join(' + ');
+      case 'pending': return 'SEQ registrada — aguardando o relatório do mês para confirmar o valor.';
+      case 'rejected': return e.note;
+      case 'no_bonus': return 'SEQ encontrada, mas não bonifica nesta categoria.' + (e.note ? ' ' + e.note : '');
+      default: return '';
+    }
+  };
+
+  const myCode = state.currentSellerCode;
+  const already = state.entries.find(e => e.tipo===tipo && norm(e.seq)===norm(seq) && norm(e.vcodigo)===norm(myCode));
+  if(already){
+    lens.classList.add(lensClassFor(already.status));
+    resultEl.className = 'cbf-result ' + (already.status==='resolved'?'ok':(already.status==='rejected'?'err':'warn'));
+    resultEl.textContent = 'Já registrada em ' + dateStr(already.ts) + '. ' + messageFor(already);
+    input.value=''; input.focus();
+    return;
+  }
+
+  let entry = { id: Date.now()+'-'+Math.random().toString(36).slice(2), tipo, seq, vcodigo: myCode, ts: Date.now() };
+  entry = recomputeEntry(entry);
+  const { error } = await supabase.from('entries').insert([entry]);
+  if(error){
+    resultEl.className = 'cbf-result err';
+    resultEl.textContent = 'Falha ao salvar: ' + error.message;
+    return;
+  }
+  state.entries.push(entry);
+
+  lens.classList.add(lensClassFor(entry.status));
+  resultEl.className = 'cbf-result ' + (entry.status==='resolved'?'ok':(entry.status==='rejected'?'err':'warn'));
+  resultEl.textContent = messageFor(entry);
+  input.value='';
+  render();
+  setTimeout(()=>{ const i=document.getElementById('seqInput-'+tipo); if(i) i.focus(); }, 0);
+}
+
+async function saveAdminField(field){
+  let ok = true; let count = 0; let label = field;
+  if(field==='sellers'){
+    state.sellers = parseSellers(document.getElementById('sellersText').value);
+    state.adminStatus = 'Salvando...'; render();
+    ok = await replaceTable('sellers', 'codigo', state.sellers, 500);
+    count = state.sellers.length; label = 'vendedores';
+  } else if(field==='refVendas'){
+    state.refVendas = parseRefVendas(document.getElementById('refVendasText').value);
+    state.adminStatus = 'Salvando ' + state.refVendas.length + ' linhas, aguarde...'; render();
+    ok = await replaceTable('ref_vendas', 'id', state.refVendas, 500);
+    count = state.refVendas.length; label = 'linhas do relatório de Vendas';
+    if(ok){ state.refVendas = await fetchAllRows('ref_vendas'); await reconcileAll(); }
+  } else if(field==='refCF'){
+    state.refCF = parseRefCF(document.getElementById('refCFText').value);
+    state.adminStatus = 'Salvando ' + state.refCF.length + ' linhas, aguarde...'; render();
+    ok = await replaceTable('ref_cf', 'id', state.refCF, 500);
+    count = state.refCF.length; label = 'linhas do relatório CF';
+    if(ok){ state.refCF = await fetchAllRows('ref_cf', 'ordem'); await reconcileAll(); }
+  } else if(field==='bonusSku'){
+    state.bonusSku = parseBonusSku(document.getElementById('bonusSkuText').value);
+    state.adminStatus = 'Salvando...'; render();
+    ok = await replaceTable('bonus_sku', 'codigo', state.bonusSku, 500);
+    count = state.bonusSku.length; label = 'SKUs de bonificação';
+    if(ok) await reconcileAll();
+  } else if(field==='bonusMarca'){
+    state.bonusMarca = parseBonusMarca(document.getElementById('bonusMarcaText').value);
+    state.adminStatus = 'Salvando...'; render();
+    ok = await replaceTable('bonus_marca', 'marca', state.bonusMarca, 500);
+    count = state.bonusMarca.length; label = 'marcas cadastradas';
+    if(ok) await reconcileAll();
+  } else if(field==='baleiaEspeciais'){
+    const codes = toLines(document.getElementById('baleiaEspeciaisText').value).map(l=>splitLine(l)[0]).filter(Boolean);
+    state.baleiaEspeciais = codes.map(c=>({vcodigo:c}));
+    state.adminStatus = 'Salvando...'; render();
+    ok = await replaceTable('baleia_especiais', 'vcodigo', state.baleiaEspeciais, 500);
+    count = state.baleiaEspeciais.length; label = 'vendedores especiais';
+    if(ok) await reconcileAll();
+  }
+  state.adminStatus = ok
+    ? ('✓ Salvo — ' + count + ' ' + label + '.')
+    : ('✗ Falha ao salvar ' + label + '.' + (lastError ? ' Detalhe: ' + lastError : ''));
+  render();
+}
+
+async function deleteEntry(id){
+  const { error } = await supabase.from('entries').delete().eq('id', id);
+  if(error){ state.adminStatus = '✗ Falha ao excluir. Detalhe: ' + error.message; render(); return; }
+  state.entries = state.entries.filter(e=>e.id!==id);
+  render();
+}
+
+function exportCSV(){
+  const rows = [['Vendedor','Código','Categoria','SEQ','Status','Detalhe','Valor','Data']];
+  [...state.entries].sort((a,b)=>a.ts-b.ts).forEach(e=>{
+    rows.push([nomeDoVendedor(e.vcodigo), e.vcodigo, CATS[e.tipo]?CATS[e.tipo].label:e.tipo, e.seq, statusLabel(e.status).text, (e.detalhes||[]).map(d=>d.ref).join(' | '), Number(e.total).toFixed(2).replace('.',','), new Date(e.ts).toLocaleDateString('pt-BR')]);
+  });
+  const csv = rows.map(r=>r.map(c=>`"${(c??'').toString().replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `bonificacao-${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function closeMonth(){
+  if(!confirm('Isso vai arquivar os lançamentos atuais e zerar a lista para o próximo mês. Confirma?')) return;
+  await loadEntries();
+  const archiveId = 'archive-' + now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + Date.now();
+  const { error: e1 } = await supabase.from('archives').insert([{ id: archiveId, entries: state.entries }]);
+  if(e1){ state.adminStatus = '✗ Falha ao arquivar. Detalhe: ' + e1.message; render(); return; }
+  const ok = await deleteAll('entries', 'id');
+  if(!ok){ state.adminStatus = '✗ Arquivado, mas falhou ao zerar lançamentos. Detalhe: ' + lastError; render(); return; }
+  state.entries = [];
+  state.adminStatus = '✓ Mês fechado e arquivado.';
+  render();
+}
+
+// ---------- init ----------
+(async function init(){
+  if(SUPABASE_URL.includes('COLOQUE_') || SUPABASE_ANON_KEY.includes('COLOQUE_')){
+    root.innerHTML = '<div class="cbf-card cbf-locked"><h3>Configuração pendente</h3><p class="cbf-hint">Abra o arquivo HTML e preencha SUPABASE_URL e SUPABASE_ANON_KEY no topo do &lt;script&gt;.</p></div>';
+    return;
+  }
+  await loadReferenceData();
+  await loadEntries();
+  render();
+  setInterval(async ()=>{
+    if(state.currentTab !== 'vendedor') return;
+    const activeIsSeqInput = document.activeElement && document.activeElement.id && document.activeElement.id.indexOf('seqInput-')===0;
+    if(!activeIsSeqInput){ await loadEntries(); render(); }
+  }, 12000);
+})();
+</script>
+</body>
+</html>
