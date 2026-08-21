@@ -80,7 +80,7 @@
   .cbf-locked{padding:40px 10px;text-align:center;}
   .cbf-flex-between{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
   .cbf-pending-note{font-size:12px;color:var(--amber);font-weight:600;margin-top:6px;}
-  .cbf-eyebrow{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--lens);text-transform:uppercase;}
+  .cbf-eyebrow{font-size:17px;font-weight:700;letter-spacing:0.4px;color:var(--lens);font-family:'Fraunces',serif;}
   .cbf-badge-code{display:inline-block;background:var(--ink);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 9px;border-radius:6px;letter-spacing:0.5px;}
   .cbf-welcome{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
   .cbf-welcome-name{font-family:'Fraunces',serif;font-weight:600;font-size:17px;}
@@ -125,7 +125,11 @@ let state = {
   currentSellerCode: '',
   adminUnlocked: false,
   adminStatus: '',
-  refDataLoaded: false
+  refDataLoaded: false,
+  adminFilterVendedor: '',
+  adminFilterCategoria: '',
+  auditResults: null,
+  auditRunning: false
 };
 
 let lastError = '';
@@ -266,67 +270,85 @@ function parseSellers(text){
 // ---------- lookups ----------
 function lookupLentes(seq, codigo){
   const rows = state.refVendas.filter(r => norm(r.seq) === norm(seq));
-  if(rows.length === 0) return { status:'pending', detalhes:[], total:0, note:'' };
+  if(rows.length === 0){
+    if(state.refCF.some(r => norm(r.seq) === norm(seq))){
+      return { status:'wrong_report', detalhes:[], total:0, note:'Essa SEQ é do relatório CF — lance no campo "3 · Vendas CF".', item:'' };
+    }
+    return { status:'pending', detalhes:[], total:0, note:'', item:'' };
+  }
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
-  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.' };
-  const detalhes = []; const notes = [];
+  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
+  const detalhes = []; const notes = []; const itens = [];
   own.forEach(r=>{
     const bs = state.bonusSku.find(b => norm(b.codigo) === norm(r.produto));
     if(bs){
       const pct = parseValor(r.pct);
       if(pct <= state.settings.descontoMax + 1e-9){
         detalhes.push({ ref: r.produto + ' — ' + r.descricao, valor: Number(bs.valor) });
+        itens.push(r.descricao);
       } else {
         notes.push('Desconto de ' + pct.toFixed(2).replace('.',',') + '% no SKU ' + r.produto + ' passou do limite de ' + state.settings.descontoMax + '%.');
       }
     }
   });
-  if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note: notes.join(' ') };
-  if(notes.length > 0) return { status:'no_bonus', detalhes:[], total:0, note: notes.join(' ') };
-  return { status:'no_bonus', detalhes:[], total:0, note:'' };
+  if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note: notes.join(' '), item: itens.join(' + ') };
+  if(notes.length > 0) return { status:'no_bonus', detalhes:[], total:0, note: notes.join(' '), item:'' };
+  return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
 }
 
 function lookupBaleia(seq, codigo){
   const rows = state.refVendas.filter(r => norm(r.seq) === norm(seq));
-  if(rows.length === 0) return { status:'pending', detalhes:[], total:0, note:'' };
+  if(rows.length === 0){
+    if(state.refCF.some(r => norm(r.seq) === norm(seq))){
+      return { status:'wrong_report', detalhes:[], total:0, note:'Essa SEQ é do relatório CF — lance no campo "3 · Vendas CF".', item:'' };
+    }
+    return { status:'pending', detalhes:[], total:0, note:'', item:'' };
+  }
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
-  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.' };
+  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
   const isEspecial = state.baleiaEspeciais.some(x => norm(x.vcodigo) === norm(codigo));
-  const detalhes = [];
+  const detalhes = []; const itens = [];
   own.forEach(r=>{
     state.bonusMarca.forEach(b=>{
       if(b.marca && norm(r.descricao).includes(norm(b.marca))){
         const valor = isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(b.valor);
         detalhes.push({ ref: b.marca + ' (' + r.produto + ')' + (isEspecial ? ' · especial' : ''), valor });
+        itens.push(b.marca);
       }
     });
   });
-  if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note:'' };
-  return { status:'no_bonus', detalhes:[], total:0, note:'' };
+  if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note:'', item: itens.join(' + ') };
+  return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
 }
 
 function lookupCF(seq, codigo){
   const rows = state.refCF.filter(r => norm(r.seq) === norm(seq)).sort((a,b)=>a.ordem-b.ordem);
-  if(rows.length === 0) return { status:'pending', detalhes:[], total:0, note:'' };
+  if(rows.length === 0){
+    if(state.refVendas.some(r => norm(r.seq) === norm(seq))){
+      return { status:'wrong_report', detalhes:[], total:0, note:'Essa SEQ é do relatório de Vendas — lance em "1 · Vendas de Lentes" ou "2 · Armações Baleias".', item:'' };
+    }
+    return { status:'pending', detalhes:[], total:0, note:'', item:'' };
+  }
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
-  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.' };
-  let pendingFrame = false; let pairedQtde = 0; let pares = 0;
+  if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
+  let pendingFrame = false; let pares = 0;
   own.forEach(r=>{
     const isLens = (r.produto||'').toUpperCase().startsWith('LSA');
     if(!isLens){ pendingFrame = true; }
-    else if(pendingFrame){ pairedQtde += parseValor(r.qtde); pares++; pendingFrame = false; }
+    else if(pendingFrame){ pares++; pendingFrame = false; }
   });
-  if(pairedQtde <= 0) return { status:'no_bonus', detalhes:[], total:0, note:'' };
-  const total = pairedQtde * state.settings.valorCF;
-  return { status:'resolved', detalhes:[{ ref: pairedQtde + ' lente(s) em ' + pares + ' par(es) com armação', valor: total }], total, note:'' };
+  if(pares <= 0) return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
+  const total = pares * state.settings.valorCF;
+  return { status:'resolved', detalhes:[{ ref: pares + ' par(es) completo(s) (armação + lentes)', valor: total }], total, note:'', item: pares + ' par(es)' };
 }
 
 function recomputeEntry(e){
+  if(e.manual) return e;
   let r;
   if(e.tipo === 'lentes') r = lookupLentes(e.seq, e.vcodigo);
   else if(e.tipo === 'baleia') r = lookupBaleia(e.seq, e.vcodigo);
   else r = lookupCF(e.seq, e.vcodigo);
-  e.status = r.status; e.detalhes = r.detalhes; e.total = r.total; e.note = r.note;
+  e.status = r.status; e.detalhes = r.detalhes; e.total = r.total; e.note = r.note; e.item = r.item || '';
   return e;
 }
 
@@ -336,11 +358,13 @@ async function reconcileAll(){
   await batchUpsert('entries', state.entries, 'id', 500);
 }
 
-function statusLabel(status){
+function statusLabel(status, manual){
+  if(manual) return {text:'Aprovada manualmente', cls:'cbf-pill-ok'};
   switch(status){
     case 'resolved': return {text:'Confirmada', cls:'cbf-pill-ok'};
     case 'pending': return {text:'Aguardando relatório', cls:'cbf-pill-warn'};
     case 'rejected': return {text:'Não pertence a você', cls:'cbf-pill-err'};
+    case 'wrong_report': return {text:'Campo errado', cls:'cbf-pill-err'};
     case 'no_bonus': return {text:'Sem bonificação', cls:''};
     default: return {text:status||'—', cls:''};
   }
@@ -371,9 +395,9 @@ function renderCategoryCard(tipo){
   const pendingCount = myEntries.filter(e=>e.status==='pending').length;
 
   const rows = myEntries.length ? myEntries.map(e=>{
-    const st = statusLabel(e.status);
-    return `<tr><td>${escHtml(e.seq)}</td><td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span></td><td>${fmtBRL(e.total)}</td><td class="mono-name">${dateStr(e.ts)}</td></tr>`;
-  }).join('') : `<tr><td colspan="4" class="cbf-empty">Nenhuma SEQ lançada ainda.</td></tr>`;
+    const st = statusLabel(e.status, e.manual);
+    return `<tr><td>${escHtml(e.seq)}</td><td class="mono-name" title="${escAttr(e.item||'')}">${escHtml((e.item||'').slice(0,28))}${(e.item||'').length>28?'…':''}</td><td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span></td><td>${fmtBRL(e.total)}</td><td class="mono-name">${dateStr(e.ts)}</td></tr>`;
+  }).join('') : `<tr><td colspan="5" class="cbf-empty">Nenhuma SEQ lançada ainda.</td></tr>`;
 
   return `
     <div class="cbf-card">
@@ -392,7 +416,7 @@ function renderCategoryCard(tipo){
         <span class="cbf-label" style="margin:0;">Lançamentos</span>
         <div class="cbf-total"><small>Subtotal</small>${fmtBRL(subtotal)}</div>
       </div>
-      <table><thead><tr><th>SEQ</th><th>Status</th><th>Valor</th><th>Data</th></tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th>SEQ</th><th>Item</th><th>Status</th><th>Valor</th><th>Data</th></tr></thead><tbody>${rows}</tbody></table>
     </div>
   `;
 }
@@ -436,6 +460,32 @@ function renderVendedor(){
   `;
 }
 
+function renderAuditBody(){
+  if(!state.auditResults){
+    return `<div class="cbf-hint">Compara os relatórios com o que já foi lançado e mostra o que ainda falta cada vendedor registrar. Pode demorar alguns segundos.</div>`;
+  }
+  const list = state.auditResults;
+  const total = list.reduce((s,m)=>s+m.valor,0);
+  if(list.length === 0){
+    return `<div class="cbf-result ok" style="margin-top:8px;">✓ Nenhuma pendência — tudo que bonifica já foi lançado.</div>`;
+  }
+  const shown = list.slice(0,300);
+  const rowsHtml = shown.map(m=>`
+    <tr>
+      <td class="mono-name">${escHtml(m.nome)} <span class="cbf-hint">${escHtml(m.vcodigo)}</span></td>
+      <td class="mono-name">${CATS[m.categoria].num}</td>
+      <td>${escHtml(m.seq)}</td>
+      <td class="mono-name" title="${escAttr(m.item)}">${escHtml(m.item.slice(0,26))}${m.item.length>26?'…':''}</td>
+      <td>${fmtBRL(m.valor)}</td>
+    </tr>
+  `).join('');
+  return `
+    <div class="cbf-pending-note" style="margin-top:8px;">${list.length} pendência(s) — total esperado ${fmtBRL(total)}${list.length>300?' (mostrando as primeiras 300)':''}.</div>
+    <div style="margin:8px 0;"><button class="cbf-btn cbf-btn-ghost" id="exportAuditBtn" style="font-size:12px;padding:6px 12px;">Exportar CSV da auditoria</button></div>
+    <table><thead><tr><th>Vendedor</th><th>Cat.</th><th>SEQ</th><th>Item</th><th>Valor esperado</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+  `;
+}
+
 function renderAdmin(){
   if(!state.adminUnlocked){
     return `
@@ -458,18 +508,32 @@ function renderAdmin(){
     <tr><td class="mono-name">${escHtml(nomeDoVendedor(code))} <span class="cbf-hint">${escHtml(code)}</span></td><td>${fmtBRL(totals[code])}</td></tr>
   `).join('') || `<tr><td colspan="2" class="cbf-empty">Sem lançamentos ainda.</td></tr>`;
 
-  const logRows = [...state.entries].sort((a,b)=>b.ts-a.ts).slice(0,500).map(e=>{
-    const st = statusLabel(e.status);
+  const sellerOptionsAdmin = [...state.sellers].sort((a,b)=>a.nome.localeCompare(b.nome)).map(s=>`<option value="${escAttr(s.codigo)}" ${s.codigo===state.adminFilterVendedor?'selected':''}>${escHtml(s.nome)} (${escHtml(s.codigo)})</option>`).join('');
+  const catOptionsAdmin = Object.keys(CATS).map(k=>`<option value="${k}" ${k===state.adminFilterCategoria?'selected':''}>${CATS[k].num} · ${CATS[k].label}</option>`).join('');
+
+  let filteredEntries = [...state.entries];
+  if(state.adminFilterVendedor) filteredEntries = filteredEntries.filter(e=>norm(e.vcodigo)===norm(state.adminFilterVendedor));
+  if(state.adminFilterCategoria) filteredEntries = filteredEntries.filter(e=>e.tipo===state.adminFilterCategoria);
+  filteredEntries.sort((a,b)=>b.ts-a.ts);
+  const totalShown = filteredEntries.length;
+  filteredEntries = filteredEntries.slice(0,800);
+
+  const logRows = filteredEntries.map(e=>{
+    const st = statusLabel(e.status, e.manual);
     return `<tr>
       <td class="mono-name">${escHtml(nomeDoVendedor(e.vcodigo))}</td>
       <td class="mono-name">${CATS[e.tipo] ? CATS[e.tipo].num : ''}</td>
       <td>${escHtml(e.seq)}</td>
-      <td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span> ${escHtml((e.detalhes||[]).map(d=>d.ref).join(' | '))}</td>
+      <td class="mono-name" title="${escAttr(e.item||'')}">${escHtml((e.item||'').slice(0,24))}${(e.item||'').length>24?'…':''}</td>
+      <td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span></td>
       <td>${fmtBRL(e.total)}</td>
       <td class="mono-name">${dateStr(e.ts)}</td>
-      <td><button class="cbf-btn cbf-btn-danger" data-del="${escAttr(e.id)}" style="padding:4px 10px;font-size:11px;">Excluir</button></td>
+      <td style="white-space:nowrap;">
+        <button class="cbf-btn cbf-btn-ghost" data-approve="${escAttr(e.id)}" style="padding:4px 8px;font-size:11px;">Aprovar</button>
+        <button class="cbf-btn cbf-btn-danger" data-del="${escAttr(e.id)}" style="padding:4px 8px;font-size:11px;">Excluir</button>
+      </td>
     </tr>`;
-  }).join('') || `<tr><td colspan="7" class="cbf-empty">Sem lançamentos ainda.</td></tr>`;
+  }).join('') || `<tr><td colspan="8" class="cbf-empty">Sem lançamentos para esse filtro.</td></tr>`;
 
   return `
     <div class="cbf-card">
@@ -486,6 +550,14 @@ function renderAdmin(){
         <button class="cbf-btn cbf-btn-amber" id="exportBtn">Exportar CSV</button>
         <button class="cbf-btn cbf-btn-danger" id="closeMonthBtn">Fechar mês (arquiva e zera lançamentos)</button>
       </div>
+    </div>
+
+    <div class="cbf-card">
+      <div class="cbf-flex-between">
+        <h3 style="margin:0;">Auditoria <span class="cbf-hint">— vendas bonificáveis ainda não lançadas por ninguém</span></h3>
+        <button class="cbf-btn cbf-btn-ghost" id="runAuditBtn">${state.auditRunning ? 'Calculando...' : 'Rodar auditoria'}</button>
+      </div>
+      ${renderAuditBody()}
     </div>
 
     <div class="cbf-grid2">
@@ -549,8 +621,20 @@ function renderAdmin(){
     </div>
 
     <div class="cbf-card">
-      <h3>Últimos lançamentos <span class="cbf-hint">(mais recentes primeiro, até 500)</span></h3>
-      <table><thead><tr><th>Vendedor</th><th>Cat.</th><th>SEQ</th><th>Status</th><th>Valor</th><th>Data</th><th></th></tr></thead><tbody>${logRows}</tbody></table>
+      <div class="cbf-flex-between">
+        <h3 style="margin:0;">Lançamentos <span class="cbf-hint">(${totalShown} no filtro atual${totalShown>800?', mostrando 800':''})</span></h3>
+      </div>
+      <div class="cbf-grid2" style="margin-bottom:10px;">
+        <div>
+          <label class="cbf-label">Filtrar por vendedor</label>
+          <select id="filterVendedorSelect"><option value="">Todos</option>${sellerOptionsAdmin}</select>
+        </div>
+        <div>
+          <label class="cbf-label">Filtrar por categoria</label>
+          <select id="filterCategoriaSelect"><option value="">Todas</option>${catOptionsAdmin}</select>
+        </div>
+      </div>
+      <table><thead><tr><th>Vendedor</th><th>Cat.</th><th>SEQ</th><th>Item</th><th>Status</th><th>Valor</th><th>Data</th><th></th></tr></thead><tbody>${logRows}</tbody></table>
     </div>
   `;
 }
@@ -601,6 +685,22 @@ function attachHandlers(){
     } else {
       document.querySelectorAll('[data-save]').forEach(b=>{ b.onclick = ()=> saveAdminField(b.getAttribute('data-save')); });
       document.querySelectorAll('[data-del]').forEach(b=>{ b.onclick = ()=> deleteEntry(b.getAttribute('data-del')); });
+      document.querySelectorAll('[data-approve]').forEach(b=>{ b.onclick = ()=> approveEntry(b.getAttribute('data-approve')); });
+      const auditBtn = document.getElementById('runAuditBtn');
+      if(auditBtn) auditBtn.onclick = ()=>{
+        state.auditRunning = true; render();
+        setTimeout(()=>{
+          state.auditResults = runAudit();
+          state.auditRunning = false;
+          render();
+        }, 30);
+      };
+      const exportAuditBtn = document.getElementById('exportAuditBtn');
+      if(exportAuditBtn) exportAuditBtn.onclick = exportAuditCSV;
+      const fVend = document.getElementById('filterVendedorSelect');
+      if(fVend) fVend.onchange = ()=>{ state.adminFilterVendedor = fVend.value; render(); };
+      const fCat = document.getElementById('filterCategoriaSelect');
+      if(fCat) fCat.onchange = ()=>{ state.adminFilterCategoria = fCat.value; render(); };
       const reloadBtn = document.getElementById('reloadBtn');
       if(reloadBtn) reloadBtn.onclick = async ()=>{ state.adminStatus='Recarregando...'; render(); await loadReferenceData(); await loadEntries(); state.adminStatus='✓ Dados recarregados.'; render(); };
       const recBtn = document.getElementById('reconcileBtn');
@@ -637,12 +737,13 @@ async function submitSeq(tipo){
   lens.classList.add('pulse');
   setTimeout(()=>lens.classList.remove('pulse'), 500);
 
-  const lensClassFor = (status)=> status==='resolved' ? 'ok' : (status==='rejected' ? 'err' : 'warn');
+  const lensClassFor = (status)=> status==='resolved' ? 'ok' : (status==='rejected'||status==='wrong_report' ? 'err' : 'warn');
   const messageFor = (e)=>{
     switch(e.status){
       case 'resolved': return fmtBRL(e.total) + ' — ' + (e.detalhes||[]).map(d=>d.ref).join(' + ');
       case 'pending': return 'SEQ registrada — aguardando o relatório do mês para confirmar o valor.';
       case 'rejected': return e.note;
+      case 'wrong_report': return e.note;
       case 'no_bonus': return 'SEQ encontrada, mas não bonifica nesta categoria.' + (e.note ? ' ' + e.note : '');
       default: return '';
     }
@@ -660,6 +761,15 @@ async function submitSeq(tipo){
 
   let entry = { id: Date.now()+'-'+Math.random().toString(36).slice(2), tipo, seq, vcodigo: myCode, ts: Date.now() };
   entry = recomputeEntry(entry);
+
+  if(entry.status === 'wrong_report'){
+    lens.classList.add('err');
+    resultEl.className = 'cbf-result err';
+    resultEl.textContent = entry.note;
+    input.value=''; input.focus();
+    return;
+  }
+
   const { error } = await supabase.from('entries').insert([entry]);
   if(error){
     resultEl.className = 'cbf-result err';
@@ -721,6 +831,92 @@ async function saveAdminField(field){
   render();
 }
 
+function runAudit(){
+  const bySeqVendas = {};
+  state.refVendas.forEach(r=>{ const k=norm(r.seq); (bySeqVendas[k]=bySeqVendas[k]||[]).push(r); });
+  const bySeqCF = {};
+  state.refCF.forEach(r=>{ const k=norm(r.seq); (bySeqCF[k]=bySeqCF[k]||[]).push(r); });
+
+  const loggedLentes = new Set(), loggedBaleia = new Set(), loggedCF = new Set();
+  state.entries.forEach(e=>{
+    if(e.status==='resolved' || e.manual){
+      const key = norm(e.seq)+'|'+norm(e.vcodigo);
+      if(e.tipo==='lentes') loggedLentes.add(key);
+      else if(e.tipo==='baleia') loggedBaleia.add(key);
+      else loggedCF.add(key);
+    }
+  });
+
+  const missing = [];
+
+  Object.keys(bySeqVendas).forEach(seqKey=>{
+    const rows = bySeqVendas[seqKey];
+    const vcodigo = rows[0].vcodigo;
+    const seq = rows[0].seq;
+    const key = seqKey + '|' + norm(vcodigo);
+
+    if(!loggedLentes.has(key)){
+      let total = 0; const itens = [];
+      rows.forEach(r=>{
+        const bs = state.bonusSku.find(b=>norm(b.codigo)===norm(r.produto));
+        if(bs){
+          const pct = parseValor(r.pct);
+          if(pct <= state.settings.descontoMax + 1e-9){ total += Number(bs.valor); itens.push(r.descricao); }
+        }
+      });
+      if(total > 0) missing.push({ seq, vcodigo, nome: nomeDoVendedor(vcodigo), categoria:'lentes', catLabel: CATS.lentes.label, valor: total, item: itens.join(' + ') });
+    }
+
+    if(!loggedBaleia.has(key)){
+      const isEspecial = state.baleiaEspeciais.some(x=>norm(x.vcodigo)===norm(vcodigo));
+      let total = 0; const itens = [];
+      rows.forEach(r=>{
+        state.bonusMarca.forEach(b=>{
+          if(b.marca && norm(r.descricao).includes(norm(b.marca))){
+            total += isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(b.valor);
+            itens.push(b.marca);
+          }
+        });
+      });
+      if(total > 0) missing.push({ seq, vcodigo, nome: nomeDoVendedor(vcodigo), categoria:'baleia', catLabel: CATS.baleia.label, valor: total, item: itens.join(' + ') });
+    }
+  });
+
+  Object.keys(bySeqCF).forEach(seqKey=>{
+    const rows = [...bySeqCF[seqKey]].sort((a,b)=>a.ordem-b.ordem);
+    const vcodigo = rows[0].vcodigo;
+    const seq = rows[0].seq;
+    const key = seqKey + '|' + norm(vcodigo);
+    if(!loggedCF.has(key)){
+      let pendingFrame = false, pares = 0;
+      rows.forEach(r=>{
+        const isLens = (r.produto||'').toUpperCase().startsWith('LSA');
+        if(!isLens) pendingFrame = true;
+        else if(pendingFrame){ pares++; pendingFrame = false; }
+      });
+      if(pares > 0) missing.push({ seq, vcodigo, nome: nomeDoVendedor(vcodigo), categoria:'cf', catLabel: CATS.cf.label, valor: pares*state.settings.valorCF, item: pares+' par(es)' });
+    }
+  });
+
+  missing.sort((a,b)=> a.nome.localeCompare(b.nome) || Number(a.seq)-Number(b.seq));
+  return missing;
+}
+
+function exportAuditCSV(){
+  if(!state.auditResults) return;
+  const rows = [['Vendedor','Código','Categoria','SEQ','Item','Valor esperado']];
+  state.auditResults.forEach(m=>{
+    rows.push([m.nome, m.vcodigo, m.catLabel, m.seq, m.item, Number(m.valor).toFixed(2).replace('.',',')]);
+  });
+  const csv = rows.map(r=>r.map(c=>`"${(c??'').toString().replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `auditoria-pendentes-${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 async function deleteEntry(id){
   const { error } = await supabase.from('entries').delete().eq('id', id);
   if(error){ state.adminStatus = '✗ Falha ao excluir. Detalhe: ' + error.message; render(); return; }
@@ -728,10 +924,33 @@ async function deleteEntry(id){
   render();
 }
 
+async function approveEntry(id){
+  const entry = state.entries.find(e=>e.id===id);
+  if(!entry) return;
+  const sugestao = entry.total ? Number(entry.total).toFixed(2).replace('.',',') : '';
+  const valorStr = prompt('SEQ ' + entry.seq + ' — valor da bonificação (R$) para aprovar manualmente:', sugestao);
+  if(valorStr === null) return; // cancelado
+  const valor = parseValor(valorStr);
+  const motivo = prompt('Motivo da aprovação manual (opcional, aparece no relatório):', entry.note || '') || '';
+  const updated = {
+    manual: true,
+    status: 'resolved',
+    total: valor,
+    detalhes: [{ ref: 'Aprovação manual' + (motivo ? ' — ' + motivo : ''), valor }],
+    item: 'Aprovação manual',
+    note: motivo
+  };
+  const { error } = await supabase.from('entries').update(updated).eq('id', id);
+  if(error){ state.adminStatus = '✗ Falha ao aprovar. Detalhe: ' + error.message; render(); return; }
+  Object.assign(entry, updated);
+  state.adminStatus = '✓ SEQ ' + entry.seq + ' aprovada manualmente — ' + fmtBRL(valor) + '.';
+  render();
+}
+
 function exportCSV(){
-  const rows = [['Vendedor','Código','Categoria','SEQ','Status','Detalhe','Valor','Data']];
+  const rows = [['Vendedor','Código','Categoria','SEQ','Item','Status','Detalhe','Valor','Data']];
   [...state.entries].sort((a,b)=>a.ts-b.ts).forEach(e=>{
-    rows.push([nomeDoVendedor(e.vcodigo), e.vcodigo, CATS[e.tipo]?CATS[e.tipo].label:e.tipo, e.seq, statusLabel(e.status).text, (e.detalhes||[]).map(d=>d.ref).join(' | '), Number(e.total).toFixed(2).replace('.',','), new Date(e.ts).toLocaleDateString('pt-BR')]);
+    rows.push([nomeDoVendedor(e.vcodigo), e.vcodigo, CATS[e.tipo]?CATS[e.tipo].label:e.tipo, e.seq, e.item||'', statusLabel(e.status, e.manual).text, (e.detalhes||[]).map(d=>d.ref).join(' | '), Number(e.total).toFixed(2).replace('.',','), new Date(e.ts).toLocaleDateString('pt-BR')]);
   });
   const csv = rows.map(r=>r.map(c=>`"${(c??'').toString().replace(/"/g,'""')}"`).join(';')).join('\n');
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
@@ -751,6 +970,7 @@ async function closeMonth(){
   const ok = await deleteAll('entries', 'id');
   if(!ok){ state.adminStatus = '✗ Arquivado, mas falhou ao zerar lançamentos. Detalhe: ' + lastError; render(); return; }
   state.entries = [];
+  state.auditResults = null;
   state.adminStatus = '✓ Mês fechado e arquivado.';
   render();
 }
