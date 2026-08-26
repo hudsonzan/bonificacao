@@ -119,7 +119,7 @@ const CATS = {
 
 let state = {
   sellers: [], refVendas: [], refCF: [], bonusSku: [], bonusMarca: [], baleiaEspeciais: [],
-  settings: { descontoMax: 10, valorCF: 10, valorBaleiaEspecial: 10 },
+  settings: { descontoMax: 10, valorCF: 10, valorBaleiaEspecial: 10, xrDescontoMin: 40, xrDescontoMax: 55 },
   entries: [],
   currentTab: 'vendedor',
   currentSellerCode: '',
@@ -196,7 +196,7 @@ async function loadReferenceData(){
   state.baleiaEspeciais = await fetchAllRows('baleia_especiais');
   const { data: settingsRows, error } = await supabase.from('settings').select('*').eq('id',1).limit(1);
   if(!error && settingsRows && settingsRows[0]){
-    state.settings = { descontoMax: Number(settingsRows[0].desconto_max), valorCF: Number(settingsRows[0].valor_cf), valorBaleiaEspecial: Number(settingsRows[0].valor_baleia_especial||10) };
+    state.settings = { descontoMax: Number(settingsRows[0].desconto_max), valorCF: Number(settingsRows[0].valor_cf), valorBaleiaEspecial: Number(settingsRows[0].valor_baleia_especial||10), xrDescontoMin: Number(settingsRows[0].xr_desconto_min||40), xrDescontoMax: Number(settingsRows[0].xr_desconto_max||55) };
   }
   state.refDataLoaded = true;
 }
@@ -241,7 +241,7 @@ function parseRefVendas(text){
 function parseRefCF(text){
   return toLines(text).filter(l=>{const c=splitLine(l); return !isHeaderRow(c);}).map((l,i)=>{
     const c = splitLine(l);
-    return { ordem:i, seq:(c[0]||'').trim(), vcodigo:(c[1]||'').trim(), produto:(c[2]||'').trim(), qtde: parseValor(c[3]) };
+    return { ordem:i, seq:(c[0]||'').trim(), vcodigo:(c[1]||'').trim(), produto:(c[2]||'').trim(), descricao:(c[3]||'').trim(), qtde: parseValor(c[4]) };
   }).filter(r=>r.seq);
 }
 function parseBonusSku(text){
@@ -268,6 +268,57 @@ function parseSellers(text){
 }
 
 // ---------- lookups ----------
+function computeLentesBonus(ownRows){
+  const detalhes = []; const notes = []; const itens = [];
+  ownRows.forEach(r=>{
+    const bs = state.bonusSku.find(b => norm(b.codigo) === norm(r.produto));
+    if(bs){
+      const pct = parseValor(r.pct);
+      const isXR = /\bXR\b/i.test(r.descricao);
+      if(pct <= state.settings.descontoMax + 1e-9){
+        detalhes.push({ ref: r.produto + ' — ' + r.descricao, valor: Number(bs.valor) });
+        itens.push(r.descricao);
+      } else if(isXR && pct >= state.settings.xrDescontoMin - 1e-9 && pct <= state.settings.xrDescontoMax + 1e-9){
+        const valorMeio = Number(bs.valor) / 2;
+        detalhes.push({ ref: r.produto + ' — ' + r.descricao + ' (Meu 1° Varilux, 50%)', valor: valorMeio });
+        itens.push(r.descricao + ' · 1° Varilux');
+      } else {
+        notes.push('Desconto de ' + pct.toFixed(2).replace('.',',') + '% no SKU ' + r.produto + ' passou do limite de ' + state.settings.descontoMax + '%.');
+      }
+    }
+  });
+  return { detalhes, notes, itens };
+}
+
+function computeBaleiaBonus(ownRows, vcodigo){
+  const isEspecial = state.baleiaEspeciais.some(x => norm(x.vcodigo) === norm(vcodigo));
+  const detalhes = []; const itens = [];
+  ownRows.forEach(r=>{
+    state.bonusMarca.forEach(b=>{
+      if(b.marca && norm(r.descricao).includes(norm(b.marca))){
+        const valor = isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(b.valor);
+        detalhes.push({ ref: b.marca + ' (' + r.produto + ')' + (isEspecial ? ' · especial' : ''), valor });
+        itens.push(b.marca);
+      }
+    });
+  });
+  return { detalhes, itens };
+}
+
+function computeCFBonus(ownRowsSorted){
+  let pendingFrame = false; let pares = 0; let aroDeUsoCount = 0;
+  ownRowsSorted.forEach(r=>{
+    const isLens = (r.produto||'').toUpperCase().startsWith('LSA');
+    const isAroDeUso = norm(r.descricao).includes('aro de uso');
+    if(!isLens){
+      if(isAroDeUso){ pendingFrame = false; aroDeUsoCount++; }
+      else{ pendingFrame = true; }
+    }
+    else if(pendingFrame){ pares++; pendingFrame = false; }
+  });
+  return { pares, aroDeUsoCount };
+}
+
 function lookupLentes(seq, codigo){
   const rows = state.refVendas.filter(r => norm(r.seq) === norm(seq));
   if(rows.length === 0){
@@ -278,19 +329,7 @@ function lookupLentes(seq, codigo){
   }
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
   if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
-  const detalhes = []; const notes = []; const itens = [];
-  own.forEach(r=>{
-    const bs = state.bonusSku.find(b => norm(b.codigo) === norm(r.produto));
-    if(bs){
-      const pct = parseValor(r.pct);
-      if(pct <= state.settings.descontoMax + 1e-9){
-        detalhes.push({ ref: r.produto + ' — ' + r.descricao, valor: Number(bs.valor) });
-        itens.push(r.descricao);
-      } else {
-        notes.push('Desconto de ' + pct.toFixed(2).replace('.',',') + '% no SKU ' + r.produto + ' passou do limite de ' + state.settings.descontoMax + '%.');
-      }
-    }
-  });
+  const { detalhes, notes, itens } = computeLentesBonus(own);
   if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note: notes.join(' '), item: itens.join(' + ') };
   if(notes.length > 0) return { status:'no_bonus', detalhes:[], total:0, note: notes.join(' '), item:'' };
   return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
@@ -306,17 +345,7 @@ function lookupBaleia(seq, codigo){
   }
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
   if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
-  const isEspecial = state.baleiaEspeciais.some(x => norm(x.vcodigo) === norm(codigo));
-  const detalhes = []; const itens = [];
-  own.forEach(r=>{
-    state.bonusMarca.forEach(b=>{
-      if(b.marca && norm(r.descricao).includes(norm(b.marca))){
-        const valor = isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(b.valor);
-        detalhes.push({ ref: b.marca + ' (' + r.produto + ')' + (isEspecial ? ' · especial' : ''), valor });
-        itens.push(b.marca);
-      }
-    });
-  });
+  const { detalhes, itens } = computeBaleiaBonus(own, codigo);
   if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note:'', item: itens.join(' + ') };
   return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
 }
@@ -331,15 +360,10 @@ function lookupCF(seq, codigo){
   }
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
   if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
-  let pendingFrame = false; let pares = 0;
-  own.forEach(r=>{
-    const isLens = (r.produto||'').toUpperCase().startsWith('LSA');
-    if(!isLens){ pendingFrame = true; }
-    else if(pendingFrame){ pares++; pendingFrame = false; }
-  });
-  if(pares <= 0) return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
+  const { pares, aroDeUsoCount } = computeCFBonus(own);
+  if(pares <= 0) return { status:'no_bonus', detalhes:[], total:0, note: aroDeUsoCount ? 'Lente para armação de uso do cliente (aro de uso) não bonifica.' : '', item:'' };
   const total = pares * state.settings.valorCF;
-  return { status:'resolved', detalhes:[{ ref: pares + ' par(es) completo(s) (armação + lentes)', valor: total }], total, note:'', item: pares + ' par(es)' };
+  return { status:'resolved', detalhes:[{ ref: pares + ' par(es) completo(s) (armação + lentes)', valor: total }], total, note: aroDeUsoCount ? (aroDeUsoCount+' lente(s) de aro de uso não contadas.') : '', item: pares + ' par(es)' };
 }
 
 function recomputeEntry(e){
@@ -566,11 +590,17 @@ function renderAdmin(){
         <label class="cbf-label">Desconto máximo na lente (%) — categoria 1</label>
         <input type="number" step="0.1" id="descontoMaxInput" value="${state.settings.descontoMax}">
         <div style="height:10px;"></div>
-        <label class="cbf-label">Valor por lente na Vendas CF (R$) — categoria 3</label>
+        <label class="cbf-label">Valor por par completo na Vendas CF (R$) — categoria 3</label>
         <input type="number" step="0.01" id="valorCFInput" value="${state.settings.valorCF}">
         <div style="height:10px;"></div>
         <label class="cbf-label">Valor especial Armações Baleias (R$) — categoria 2</label>
         <input type="number" step="0.01" id="valorBaleiaEspecialInput" value="${state.settings.valorBaleiaEspecial}">
+        <div style="height:10px;"></div>
+        <label class="cbf-label">Promoção "Meu 1° Varilux" (XR) — desconto mínimo e máximo (%) para pagar 50% — categoria 1</label>
+        <div style="display:flex;gap:8px;">
+          <input type="number" step="0.1" id="xrDescontoMinInput" value="${state.settings.xrDescontoMin}" placeholder="mín.">
+          <input type="number" step="0.1" id="xrDescontoMaxInput" value="${state.settings.xrDescontoMax}" placeholder="máx.">
+        </div>
         <div style="margin-top:10px;"><button class="cbf-btn cbf-btn-primary" id="saveSettingsBtn">Salvar configurações</button></div>
       </div>
       <div class="cbf-card">
@@ -599,8 +629,8 @@ function renderAdmin(){
       </div>
       <div class="cbf-card">
         <h3>Relatório de Vendas CF <span class="cbf-hint">(categoria 3)</span></h3>
-        <label class="cbf-label">seq;codigo_vendedor;codigo_produto;qtde — mantenha a ordem original das linhas</label>
-        <textarea id="refCFText">${escHtml(state.refCF.map(r=>[r.seq,r.vcodigo,r.produto,r.qtde].join(';')).join('\n'))}</textarea>
+        <label class="cbf-label">seq;codigo_vendedor;codigo_produto;descricao;qtde — mantenha a ordem original das linhas</label>
+        <textarea id="refCFText">${escHtml(state.refCF.map(r=>[r.seq,r.vcodigo,r.produto,r.descricao,r.qtde].join(';')).join('\n'))}</textarea>
         <div class="cbf-hint">${state.refCF.length} registros carregados</div>
         <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="refCF">Salvar</button></div>
       </div>
@@ -714,7 +744,15 @@ function attachHandlers(){
         state.settings.descontoMax = parseValor(document.getElementById('descontoMaxInput').value) || 0;
         state.settings.valorCF = parseValor(document.getElementById('valorCFInput').value) || 0;
         state.settings.valorBaleiaEspecial = parseValor(document.getElementById('valorBaleiaEspecialInput').value) || 0;
-        const { error } = await supabase.from('settings').update({desconto_max: state.settings.descontoMax, valor_cf: state.settings.valorCF, valor_baleia_especial: state.settings.valorBaleiaEspecial}).eq('id',1);
+        state.settings.xrDescontoMin = parseValor(document.getElementById('xrDescontoMinInput').value) || 0;
+        state.settings.xrDescontoMax = parseValor(document.getElementById('xrDescontoMaxInput').value) || 0;
+        const { error } = await supabase.from('settings').update({
+          desconto_max: state.settings.descontoMax,
+          valor_cf: state.settings.valorCF,
+          valor_baleia_especial: state.settings.valorBaleiaEspecial,
+          xr_desconto_min: state.settings.xrDescontoMin,
+          xr_desconto_max: state.settings.xrDescontoMax
+        }).eq('id',1);
         if(error){ lastError = error.message; state.adminStatus = '✗ Falha ao salvar configurações. Detalhe: ' + lastError; }
         else{ await reconcileAll(); state.adminStatus = '✓ Configurações salvas.'; }
         render();
@@ -856,28 +894,14 @@ function runAudit(){
     const key = seqKey + '|' + norm(vcodigo);
 
     if(!loggedLentes.has(key)){
-      let total = 0; const itens = [];
-      rows.forEach(r=>{
-        const bs = state.bonusSku.find(b=>norm(b.codigo)===norm(r.produto));
-        if(bs){
-          const pct = parseValor(r.pct);
-          if(pct <= state.settings.descontoMax + 1e-9){ total += Number(bs.valor); itens.push(r.descricao); }
-        }
-      });
+      const { detalhes, itens } = computeLentesBonus(rows);
+      const total = detalhes.reduce((s,d)=>s+d.valor,0);
       if(total > 0) missing.push({ seq, vcodigo, nome: nomeDoVendedor(vcodigo), categoria:'lentes', catLabel: CATS.lentes.label, valor: total, item: itens.join(' + ') });
     }
 
     if(!loggedBaleia.has(key)){
-      const isEspecial = state.baleiaEspeciais.some(x=>norm(x.vcodigo)===norm(vcodigo));
-      let total = 0; const itens = [];
-      rows.forEach(r=>{
-        state.bonusMarca.forEach(b=>{
-          if(b.marca && norm(r.descricao).includes(norm(b.marca))){
-            total += isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(b.valor);
-            itens.push(b.marca);
-          }
-        });
-      });
+      const { detalhes, itens } = computeBaleiaBonus(rows, vcodigo);
+      const total = detalhes.reduce((s,d)=>s+d.valor,0);
       if(total > 0) missing.push({ seq, vcodigo, nome: nomeDoVendedor(vcodigo), categoria:'baleia', catLabel: CATS.baleia.label, valor: total, item: itens.join(' + ') });
     }
   });
@@ -888,12 +912,7 @@ function runAudit(){
     const seq = rows[0].seq;
     const key = seqKey + '|' + norm(vcodigo);
     if(!loggedCF.has(key)){
-      let pendingFrame = false, pares = 0;
-      rows.forEach(r=>{
-        const isLens = (r.produto||'').toUpperCase().startsWith('LSA');
-        if(!isLens) pendingFrame = true;
-        else if(pendingFrame){ pares++; pendingFrame = false; }
-      });
+      const { pares } = computeCFBonus(rows);
       if(pares > 0) missing.push({ seq, vcodigo, nome: nomeDoVendedor(vcodigo), categoria:'cf', catLabel: CATS.cf.label, valor: pares*state.settings.valorCF, item: pares+' par(es)' });
     }
   });
