@@ -85,6 +85,7 @@
   .cbf-welcome{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
   .cbf-welcome-name{font-family:'Fraunces',serif;font-weight:600;font-size:17px;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 </head>
 <body>
 <div class="cbf-root" id="cbfRoot">
@@ -102,6 +103,10 @@
 
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+}
 
 // ======= CONFIGURE AQUI =======
 const SUPABASE_URL = "https://wtdgdqbzvzvlimsweuth.supabase.co";
@@ -129,7 +134,9 @@ let state = {
   adminFilterVendedor: '',
   adminFilterCategoria: '',
   auditResults: null,
-  auditRunning: false
+  auditRunning: false,
+  vendasPdfName: '',
+  cfPdfName: ''
 };
 
 let lastError = '';
@@ -622,6 +629,12 @@ function renderAdmin(){
     <div class="cbf-grid2">
       <div class="cbf-card">
         <h3>Relatório de Vendas <span class="cbf-hint">(categorias 1 e 2)</span></h3>
+        <div class="cbf-hint">Importe o PDF direto (recomendado) ou cole o texto manualmente abaixo.</div>
+        ${state.vendasPdfName ? `<div class="cbf-welcome-name" id="vendasPdfNameLabel" style="font-size:14px;margin:6px 0;">📄 ${escHtml(state.vendasPdfName)}</div>` : `<div class="cbf-welcome-name" id="vendasPdfNameLabel" style="font-size:14px;margin:6px 0;"></div>`}
+        <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
+          <input type="file" accept="application/pdf" id="vendasPdfInput" style="flex:1;min-width:160px;">
+          <button class="cbf-btn cbf-btn-amber" id="vendasPdfBtn">Processar PDF</button>
+        </div>
         <label class="cbf-label">seq;codigo_vendedor;codigo_produto;descricao;desconto% (um por linha)</label>
         <textarea id="refVendasText">${escHtml(state.refVendas.map(r=>[r.seq,r.vcodigo,r.produto,r.descricao,r.pct].join(';')).join('\n'))}</textarea>
         <div class="cbf-hint">${state.refVendas.length} registros carregados</div>
@@ -629,6 +642,12 @@ function renderAdmin(){
       </div>
       <div class="cbf-card">
         <h3>Relatório de Vendas CF <span class="cbf-hint">(categoria 3)</span></h3>
+        <div class="cbf-hint">Importe o PDF direto (recomendado) ou cole o texto manualmente abaixo.</div>
+        ${state.cfPdfName ? `<div class="cbf-welcome-name" id="cfPdfNameLabel" style="font-size:14px;margin:6px 0;">📄 ${escHtml(state.cfPdfName)}</div>` : `<div class="cbf-welcome-name" id="cfPdfNameLabel" style="font-size:14px;margin:6px 0;"></div>`}
+        <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
+          <input type="file" accept="application/pdf" id="cfPdfInput" style="flex:1;min-width:160px;">
+          <button class="cbf-btn cbf-btn-amber" id="cfPdfBtn">Processar PDF</button>
+        </div>
         <label class="cbf-label">seq;codigo_vendedor;codigo_produto;descricao;qtde — mantenha a ordem original das linhas</label>
         <textarea id="refCFText">${escHtml(state.refCF.map(r=>[r.seq,r.vcodigo,r.produto,r.descricao,r.qtde].join(';')).join('\n'))}</textarea>
         <div class="cbf-hint">${state.refCF.length} registros carregados</div>
@@ -727,6 +746,24 @@ function attachHandlers(){
       };
       const exportAuditBtn = document.getElementById('exportAuditBtn');
       if(exportAuditBtn) exportAuditBtn.onclick = exportAuditCSV;
+      const vendasPdfInput = document.getElementById('vendasPdfInput');
+      if(vendasPdfInput) vendasPdfInput.onchange = ()=>{
+        const f = vendasPdfInput.files && vendasPdfInput.files[0];
+        state.vendasPdfName = f ? f.name : '';
+        const lbl = document.getElementById('vendasPdfNameLabel');
+        if(lbl) lbl.innerHTML = f ? ('📄 ' + escHtml(f.name)) : '';
+      };
+      const vendasPdfBtn = document.getElementById('vendasPdfBtn');
+      if(vendasPdfBtn) vendasPdfBtn.onclick = processVendasPdf;
+      const cfPdfInput = document.getElementById('cfPdfInput');
+      if(cfPdfInput) cfPdfInput.onchange = ()=>{
+        const f = cfPdfInput.files && cfPdfInput.files[0];
+        state.cfPdfName = f ? f.name : '';
+        const lbl = document.getElementById('cfPdfNameLabel');
+        if(lbl) lbl.innerHTML = f ? ('📄 ' + escHtml(f.name)) : '';
+      };
+      const cfPdfBtn = document.getElementById('cfPdfBtn');
+      if(cfPdfBtn) cfPdfBtn.onclick = processCFPdf;
       const fVend = document.getElementById('filterVendedorSelect');
       if(fVend) fVend.onchange = ()=>{ state.adminFilterVendedor = fVend.value; render(); };
       const fCat = document.getElementById('filterCategoriaSelect');
@@ -867,6 +904,159 @@ async function saveAdminField(field){
     ? ('✓ Salvo — ' + count + ' ' + label + '.')
     : ('✗ Falha ao salvar ' + label + '.' + (lastError ? ' Detalhe: ' + lastError : ''));
   render();
+}
+
+// ---------- PDF import (Vendas / CF) ----------
+async function extractPdfLines(file){
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  const allLines = [];
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const items = content.items.filter(it => it.str !== undefined);
+    const sorted = [...items].sort((a,b)=> b.transform[5]-a.transform[5] || a.transform[4]-b.transform[4]);
+    const rows = [];
+    let current = null, currentY = null;
+    sorted.forEach(it=>{
+      const y = it.transform[5];
+      if(current === null || Math.abs(y - currentY) > 2){
+        if(current) rows.push(current);
+        current = [it]; currentY = y;
+      } else {
+        current.push(it);
+      }
+    });
+    if(current) rows.push(current);
+    rows.forEach(row=>{
+      row.sort((a,b)=>a.transform[4]-b.transform[4]);
+      let line = ''; let lastEnd = null;
+      row.forEach(it=>{
+        const x = it.transform[4];
+        if(lastEnd !== null && (x - lastEnd) > 2) line += ' ';
+        line += it.str;
+        lastEnd = x + (it.width || it.str.length * 4);
+      });
+      allLines.push(line);
+    });
+  }
+  return allLines;
+}
+
+function parseVendasPdfLines(lines){
+  const headerRe = /^Seq\.\s+Data\s+Vendedor\s+Cliente/;
+  const dataRe = /^\s*(\d+)\s+(\d{2}\/\d{2}\/\d{4})\s+(\d+)\s+(.+?)\s*$/;
+  const productRe = /^\s*([A-Z0-9]{5,})\s+(.+?)\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/;
+  const contRe = /^\s*(\d+)(?:\s+(\S.*))?\s*$/;
+
+  const records = [];
+  let currentSeq = null, currentCode = null, expectData = false;
+  for(let i=0; i<lines.length; i++){
+    const line = lines[i];
+    if(headerRe.test(line)){ expectData = true; continue; }
+    if(expectData){
+      if(line.trim() === '') continue;
+      const m = line.match(dataRe);
+      if(m){ currentSeq = m[1]; currentCode = m[3]; }
+      expectData = false;
+      continue;
+    }
+    const m = line.match(productRe);
+    if(m && currentSeq){
+      let [, codigo, descricao, , , , , pct] = m;
+      descricao = descricao.trim();
+      if(codigo.startsWith('LSA') && codigo.length < 10 && i+1 < lines.length){
+        const nxt = lines[i+1];
+        const mc = nxt.match(contRe);
+        const deficit = 10 - codigo.length;
+        if(mc && mc[1].length === deficit){
+          codigo = codigo + mc[1];
+          if(mc[2]) descricao = (descricao + ' ' + mc[2].trim()).trim();
+          i++;
+        }
+      }
+      records.push({ seq: currentSeq, vcodigo: currentCode, produto: codigo, descricao, pct });
+    }
+  }
+  return records;
+}
+
+function parseCFPdfLines(lines){
+  const seqRe = /^Seq\.\s*Centr\.:\s*(\d+)/;
+  const vendRe = /Vendedor:\s*(\d+)\s+(.+?)\s*$/;
+  const prodRe = /^\s*([A-Z0-9]{5,})\s+(.+?)\s+(\d+)\s+(\S+)\s+(\S+)\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/;
+  const records = [];
+  let currentSeq = null, currentCode = null, ordem = 0;
+  for(const line of lines){
+    let m = line.match(seqRe);
+    if(m){ currentSeq = m[1]; currentCode = null; continue; }
+    if(currentCode === null && line.includes('Vendedor:')){
+      const vm = line.match(vendRe);
+      if(vm) currentCode = vm[1];
+      continue;
+    }
+    m = line.match(prodRe);
+    if(m && currentSeq && currentCode){
+      const [, codigo, descricao] = m;
+      const qtde = m[6];
+      records.push({ ordem: ordem++, seq: currentSeq, vcodigo: currentCode, produto: codigo, descricao: descricao.trim(), qtde });
+    }
+  }
+  return records;
+}
+
+async function processVendasPdf(){
+  const inp = document.getElementById('vendasPdfInput');
+  const f = inp && inp.files && inp.files[0];
+  if(!f){ alert('Selecione o arquivo PDF do relatório de Vendas primeiro.'); return; }
+  state.vendasPdfName = f.name;
+  state.adminStatus = 'Lendo ' + f.name + '... pode levar alguns segundos em relatórios grandes.';
+  render();
+  try{
+    if(!window.pdfjsLib) throw new Error('Biblioteca de leitura de PDF não carregou. Recarregue a página e tente de novo.');
+    const lines = await extractPdfLines(f);
+    const records = parseVendasPdfLines(lines);
+    if(records.length === 0){
+      state.adminStatus = '✗ Não encontrei nenhuma linha reconhecível nesse PDF. Confira se é o relatório de Vendas certo (' + f.name + ').';
+      render();
+      return;
+    }
+    const csv = records.map(r=>[r.seq, r.vcodigo, r.produto, r.descricao, r.pct].join(';')).join('\n');
+    state.adminStatus = '✓ PDF "' + f.name + '" processado — ' + records.length + ' linhas encontradas. Revise abaixo e clique em Salvar pra confirmar.';
+    render();
+    const ta = document.getElementById('refVendasText');
+    if(ta) ta.value = csv;
+  }catch(err){
+    state.adminStatus = '✗ Erro ao processar "' + f.name + '": ' + (err && err.message ? err.message : err);
+    render();
+  }
+}
+
+async function processCFPdf(){
+  const inp = document.getElementById('cfPdfInput');
+  const f = inp && inp.files && inp.files[0];
+  if(!f){ alert('Selecione o arquivo PDF do relatório de Vendas CF primeiro.'); return; }
+  state.cfPdfName = f.name;
+  state.adminStatus = 'Lendo ' + f.name + '... pode levar alguns segundos em relatórios grandes.';
+  render();
+  try{
+    if(!window.pdfjsLib) throw new Error('Biblioteca de leitura de PDF não carregou. Recarregue a página e tente de novo.');
+    const lines = await extractPdfLines(f);
+    const records = parseCFPdfLines(lines);
+    if(records.length === 0){
+      state.adminStatus = '✗ Não encontrei nenhuma linha reconhecível nesse PDF. Confira se é o relatório de Vendas CF certo (' + f.name + ').';
+      render();
+      return;
+    }
+    const csv = records.map(r=>[r.seq, r.vcodigo, r.produto, r.descricao, r.qtde].join(';')).join('\n');
+    state.adminStatus = '✓ PDF "' + f.name + '" processado — ' + records.length + ' linhas encontradas. Revise abaixo e clique em Salvar pra confirmar.';
+    render();
+    const ta = document.getElementById('refCFText');
+    if(ta) ta.value = csv;
+  }catch(err){
+    state.adminStatus = '✗ Erro ao processar "' + f.name + '": ' + (err && err.message ? err.message : err);
+    render();
+  }
 }
 
 function runAudit(){
