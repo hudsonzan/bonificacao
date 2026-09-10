@@ -85,7 +85,6 @@
   .cbf-welcome{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
   .cbf-welcome-name{font-family:'Fraunces',serif;font-weight:600;font-size:17px;}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 </head>
 <body>
 <div class="cbf-root" id="cbfRoot">
@@ -104,8 +103,15 @@
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-if (window.pdfjsLib) {
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+let pdfjsLibPromise = null;
+function getPdfjsLib(){
+  if(!pdfjsLibPromise){
+    pdfjsLibPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs').then(mod=>{
+      mod.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+      return mod;
+    });
+  }
+  return pdfjsLibPromise;
 }
 
 // ======= CONFIGURE AQUI =======
@@ -908,8 +914,9 @@ async function saveAdminField(field){
 
 // ---------- PDF import (Vendas / CF) ----------
 async function extractPdfLines(file){
+  const pdfjsLib = await getPdfjsLib();
   const buf = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   const allLines = [];
   for(let p=1; p<=pdf.numPages; p++){
     const page = await pdf.getPage(p);
@@ -1013,7 +1020,6 @@ async function processVendasPdf(){
   state.adminStatus = 'Lendo ' + f.name + '... pode levar alguns segundos em relatórios grandes.';
   render();
   try{
-    if(!window.pdfjsLib) throw new Error('Biblioteca de leitura de PDF não carregou. Recarregue a página e tente de novo.');
     const lines = await extractPdfLines(f);
     const records = parseVendasPdfLines(lines);
     if(records.length === 0){
@@ -1040,7 +1046,6 @@ async function processCFPdf(){
   state.adminStatus = 'Lendo ' + f.name + '... pode levar alguns segundos em relatórios grandes.';
   render();
   try{
-    if(!window.pdfjsLib) throw new Error('Biblioteca de leitura de PDF não carregou. Recarregue a página e tente de novo.');
     const lines = await extractPdfLines(f);
     const records = parseCFPdfLines(lines);
     if(records.length === 0){
