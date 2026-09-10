@@ -254,7 +254,7 @@ function parseRefVendas(text){
 function parseRefCF(text){
   return toLines(text).filter(l=>{const c=splitLine(l); return !isHeaderRow(c);}).map((l,i)=>{
     const c = splitLine(l);
-    return { ordem:i, seq:(c[0]||'').trim(), vcodigo:(c[1]||'').trim(), produto:(c[2]||'').trim(), descricao:(c[3]||'').trim(), qtde: parseValor(c[4]) };
+    return { ordem:i, seq:(c[0]||'').trim(), vcodigo:(c[1]||'').trim(), produto:(c[2]||'').trim(), descricao:(c[3]||'').trim(), qtde: parseValor(c[4]), seq_gerada:(c[5]||'').trim() };
   }).filter(r=>r.seq);
 }
 function parseBonusSku(text){
@@ -363,8 +363,17 @@ function lookupBaleia(seq, codigo){
   return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
 }
 
+function findCFRowsBySeq(seq){
+  return state.refCF.filter(r => norm(r.seq) === norm(seq) || norm(r.seq_gerada) === norm(seq));
+}
+
+function canonicalCFSeq(seq){
+  const row = state.refCF.find(r => norm(r.seq) === norm(seq) || norm(r.seq_gerada) === norm(seq));
+  return row ? row.seq : seq;
+}
+
 function lookupCF(seq, codigo){
-  const rows = state.refCF.filter(r => norm(r.seq) === norm(seq)).sort((a,b)=>a.ordem-b.ordem);
+  const rows = findCFRowsBySeq(seq).sort((a,b)=>a.ordem-b.ordem);
   if(rows.length === 0){
     if(state.refVendas.some(r => norm(r.seq) === norm(seq))){
       return { status:'wrong_report', detalhes:[], total:0, note:'Essa SEQ é do relatório de Vendas — lance em "1 · Vendas de Lentes" ou "2 · Armações Baleias".', item:'' };
@@ -654,8 +663,8 @@ function renderAdmin(){
           <input type="file" accept="application/pdf" id="cfPdfInput" style="flex:1;min-width:160px;">
           <button class="cbf-btn cbf-btn-amber" id="cfPdfBtn">Processar PDF</button>
         </div>
-        <label class="cbf-label">seq;codigo_vendedor;codigo_produto;descricao;qtde — mantenha a ordem original das linhas</label>
-        <textarea id="refCFText">${escHtml(state.refCF.map(r=>[r.seq,r.vcodigo,r.produto,r.descricao,r.qtde].join(';')).join('\n'))}</textarea>
+        <label class="cbf-label">seq;codigo_vendedor;codigo_produto;descricao;qtde;seq_gerada — mantenha a ordem original das linhas</label>
+        <textarea id="refCFText">${escHtml(state.refCF.map(r=>[r.seq,r.vcodigo,r.produto,r.descricao,r.qtde,r.seq_gerada||''].join(';')).join('\n'))}</textarea>
         <div class="cbf-hint">${state.refCF.length} registros carregados</div>
         <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="refCF">Salvar</button></div>
       </div>
@@ -808,10 +817,14 @@ async function submitSeq(tipo){
   const input = document.getElementById('seqInput-'+tipo);
   const resultEl = document.getElementById('seqResult-'+tipo);
   const lens = document.getElementById('lensRing-'+tipo);
-  const seq = (input.value||'').trim();
+  let seq = (input.value||'').trim();
   if(!seq) return;
 
   await loadEntries();
+
+  if(tipo === 'cf'){
+    seq = canonicalCFSeq(seq); // aceita tanto Seq. Centr. quanto Seq. Gerada, sempre grava a mesma referência
+  }
 
   lens.classList.remove('ok','warn','err');
   void lens.offsetWidth;
@@ -1005,8 +1018,9 @@ function parseCFPdfLines(lines){
     m = line.match(prodRe);
     if(m && currentSeq && currentCode){
       const [, codigo, descricao] = m;
+      const seqGerada = m[3];
       const qtde = m[6];
-      records.push({ ordem: ordem++, seq: currentSeq, vcodigo: currentCode, produto: codigo, descricao: descricao.trim(), qtde });
+      records.push({ ordem: ordem++, seq: currentSeq, vcodigo: currentCode, produto: codigo, descricao: descricao.trim(), qtde, seq_gerada: seqGerada });
     }
   }
   return records;
@@ -1053,7 +1067,7 @@ async function processCFPdf(){
       render();
       return;
     }
-    const csv = records.map(r=>[r.seq, r.vcodigo, r.produto, r.descricao, r.qtde].join(';')).join('\n');
+    const csv = records.map(r=>[r.seq, r.vcodigo, r.produto, r.descricao, r.qtde, r.seq_gerada].join(';')).join('\n');
     state.adminStatus = '✓ PDF "' + f.name + '" processado — ' + records.length + ' linhas encontradas. Revise abaixo e clique em Salvar pra confirmar.';
     render();
     const ta = document.getElementById('refCFText');
