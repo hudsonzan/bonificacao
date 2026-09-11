@@ -307,13 +307,15 @@ function computeBaleiaBonus(ownRows, vcodigo){
   const isEspecial = state.baleiaEspeciais.some(x => norm(x.vcodigo) === norm(vcodigo));
   const detalhes = []; const itens = [];
   ownRows.forEach(r=>{
-    state.bonusMarca.forEach(b=>{
-      if(b.marca && norm(r.descricao).includes(norm(b.marca))){
-        const valor = isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(b.valor);
-        detalhes.push({ ref: b.marca + ' (' + r.produto + ')' + (isEspecial ? ' · especial' : ''), valor });
-        itens.push(b.marca);
-      }
-    });
+    const matches = state.bonusMarca.filter(b => b.marca && norm(r.descricao).includes(norm(b.marca)));
+    if(matches.length > 0){
+      // se mais de uma marca cadastrada bate na mesma descrição (ex: "Hickmann" dentro de "Ana Hickmann"),
+      // conta só a mais específica (nome mais longo) pra não pagar a mesma armação duas vezes
+      const best = matches.reduce((a,b)=> b.marca.length > a.marca.length ? b : a);
+      const valor = isEspecial ? Number(state.settings.valorBaleiaEspecial) : Number(best.valor);
+      detalhes.push({ ref: best.marca + ' (' + r.produto + ')' + (isEspecial ? ' · especial' : ''), valor });
+      itens.push(best.marca);
+    }
   });
   return { detalhes, itens };
 }
