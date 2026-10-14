@@ -73,6 +73,7 @@
   .cbf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
   @media(max-width:640px){.cbf-grid2{grid-template-columns:1fr;}}
   .cbf-pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:600;background:#EFEBE0;color:var(--ink-soft);white-space:nowrap;}
+  .cbf-motivo{margin-top:3px;font-size:11px;line-height:1.3;color:var(--ink-soft);font-weight:400;white-space:normal;max-width:260px;}
   .cbf-pill-ok{background:#DFEEE5;color:var(--ok);}
   .cbf-pill-warn{background:#F5E7D4;color:#95611E;}
   .cbf-pill-err{background:#F3DFD7;color:var(--error);}
@@ -200,6 +201,25 @@ async function replaceTable(table, pkCol, rows, batchSize){
   return await batchInsert(table, rows, batchSize);
 }
 
+// Mescla por SEQ: remove só as SEQs presentes no arquivo novo e insere as linhas novas.
+// Meses anteriores (SEQs que não estão no arquivo) são preservados.
+async function mergeBySeq(table, rows, batchSize){
+  const seqs = [...new Set(rows.map(r=>r.seq))];
+  for(let i=0;i<seqs.length;i+=150){
+    const { error } = await supabase.from(table).delete().in('seq', seqs.slice(i,i+150));
+    if(error){ lastError = error.message; console.error(table, error); return false; }
+  }
+  if(rows.length===0) return true;
+  if(table === 'ref_cf'){
+    // 'ordem' é global: as linhas novas entram depois das que já existem, mantendo a ordem do arquivo
+    const { data, error } = await supabase.from('ref_cf').select('ordem').order('ordem',{ascending:false}).limit(1);
+    if(error){ lastError = error.message; return false; }
+    const base = (data && data[0] && data[0].ordem !== null) ? Number(data[0].ordem) + 1 : 0;
+    rows = rows.map((r,i)=>({ ...r, ordem: base + i }));
+  }
+  return await batchInsert(table, rows, batchSize);
+}
+
 async function loadReferenceData(){
   state.sellers = await fetchAllRows('sellers');
   state.refVendas = await fetchAllRows('ref_vendas');
@@ -282,9 +302,13 @@ function parseSellers(text){
 
 // ---------- lookups ----------
 function computeLentesBonus(ownRows){
-  const detalhes = []; const notes = []; const itens = [];
+  const detalhes = []; const notes = []; const itens = []; const lentesVistas = [];
   ownRows.forEach(r=>{
     const bs = state.bonusSku.find(b => norm(b.codigo) === norm(r.produto));
+    if(!bs && (r.produto||'').toUpperCase().startsWith('LSA')){
+      lentesVistas.push(r.descricao);
+      notes.push('SKU ' + r.produto + ' não está na tabela de bonificação.');
+    }
     if(bs){
       const pct = parseValor(r.pct);
       const isXR = /\bXR\b/i.test(r.descricao);
@@ -296,11 +320,14 @@ function computeLentesBonus(ownRows){
         detalhes.push({ ref: r.produto + ' — ' + r.descricao + ' (Meu 1° Varilux, 50%)', valor: valorMeio });
         itens.push(r.descricao + ' · 1° Varilux');
       } else {
-        notes.push('Desconto de ' + pct.toFixed(2).replace('.',',') + '% no SKU ' + r.produto + ' passou do limite de ' + state.settings.descontoMax + '%.');
+        lentesVistas.push(r.descricao);
+        const pctTxt = pct.toFixed(2).replace('.',',');
+        if(isXR) notes.push('XR com desconto ' + pctTxt + '% (fora da faixa ' + state.settings.xrDescontoMin + '–' + state.settings.xrDescontoMax + '%; máx. normal ' + state.settings.descontoMax + '%).');
+        else notes.push('Desconto ' + pctTxt + '% (máx. ' + state.settings.descontoMax + '%).');
       }
     }
   });
-  return { detalhes, notes, itens };
+  return { detalhes, notes, itens, lentesVistas };
 }
 
 function computeBaleiaBonus(ownRows, vcodigo){
@@ -344,10 +371,10 @@ function lookupLentes(seq, codigo){
   }
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
   if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
-  const { detalhes, notes, itens } = computeLentesBonus(own);
+  const { detalhes, notes, itens, lentesVistas } = computeLentesBonus(own);
   if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note: notes.join(' '), item: itens.join(' + ') };
-  if(notes.length > 0) return { status:'no_bonus', detalhes:[], total:0, note: notes.join(' '), item:'' };
-  return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
+  if(notes.length > 0) return { status:'no_bonus', detalhes:[], total:0, note: notes.join(' '), item: lentesVistas.join(' + ') };
+  return { status:'no_bonus', detalhes:[], total:0, note:'Nenhuma lente nesta venda.', item: own.map(r=>r.descricao).slice(0,2).join(' + ') };
 }
 
 function lookupBaleia(seq, codigo){
@@ -362,7 +389,8 @@ function lookupBaleia(seq, codigo){
   if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
   const { detalhes, itens } = computeBaleiaBonus(own, codigo);
   if(detalhes.length > 0) return { status:'resolved', detalhes, total: detalhes.reduce((s,d)=>s+d.valor,0), note:'', item: itens.join(' + ') };
-  return { status:'no_bonus', detalhes:[], total:0, note:'', item:'' };
+  const armacoes = own.filter(r => !(r.produto||'').toUpperCase().startsWith('LSA')).map(r=>r.descricao);
+  return { status:'no_bonus', detalhes:[], total:0, note:'Nenhuma armação de marca bonificada nesta venda.', item: armacoes.slice(0,2).join(' + ') };
 }
 
 function findCFRowsBySeq(seq){
@@ -385,7 +413,7 @@ function lookupCF(seq, codigo){
   const own = rows.filter(r => norm(r.vcodigo) === norm(codigo));
   if(own.length === 0) return { status:'rejected', detalhes:[], total:0, note:'Essa SEQ pertence a outro vendedor.', item:'' };
   const { pares, aroDeUsoCount } = computeCFBonus(own);
-  if(pares <= 0) return { status:'no_bonus', detalhes:[], total:0, note: aroDeUsoCount ? 'Lente para armação de uso do cliente (aro de uso) não bonifica.' : '', item:'' };
+  if(pares <= 0) return { status:'no_bonus', detalhes:[], total:0, note: aroDeUsoCount ? 'Lente para armação de uso do cliente (aro de uso) não bonifica.' : 'Nenhum par completo (armação + lente) nesta SEQ.', item: own.map(r=>r.descricao).slice(0,2).join(' + ') };
   const total = pares * state.settings.valorCF;
   return { status:'resolved', detalhes:[{ ref: pares + ' par(es) completo(s) (armação + lentes)', valor: total }], total, note: aroDeUsoCount ? (aroDeUsoCount+' lente(s) de aro de uso não contadas.') : '', item: pares + ' par(es)' };
 }
@@ -417,6 +445,12 @@ function statusLabel(status, manual){
     default: return {text:status||'—', cls:''};
   }
 }
+// pílula de status + motivo logo abaixo (quando não bonifica, ou quando há observação)
+function statusCell(e){
+  const st = statusLabel(e.status, e.manual);
+  const showNote = e.note && !e.manual && (e.status==='no_bonus' || e.status==='resolved');
+  return `<span class="cbf-pill ${st.cls}">${st.text}</span>` + (showNote ? `<div class="cbf-motivo" title="${escAttr(e.note)}">${escHtml(e.note)}</div>` : '');
+}
 function dateStr(ts){ return new Date(ts).toLocaleDateString('pt-BR'); }
 function escHtml(s){ const d=document.createElement('div'); d.textContent=s??''; return d.innerHTML; }
 function escAttr(s){ return (s??'').toString().replace(/"/g,'&quot;'); }
@@ -443,8 +477,7 @@ function renderCategoryCard(tipo){
   const pendingCount = myEntries.filter(e=>e.status==='pending').length;
 
   const rows = myEntries.length ? myEntries.map(e=>{
-    const st = statusLabel(e.status, e.manual);
-    return `<tr><td>${escHtml(e.seq)}</td><td class="mono-name" title="${escAttr(e.item||'')}">${escHtml((e.item||'').slice(0,28))}${(e.item||'').length>28?'…':''}</td><td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span></td><td>${fmtBRL(e.total)}</td><td class="mono-name">${dateStr(e.ts)}</td></tr>`;
+    return `<tr><td>${escHtml(e.seq)}</td><td class="mono-name" title="${escAttr(e.item||'')}">${escHtml((e.item||'').slice(0,28))}${(e.item||'').length>28?'…':''}</td><td class="mono-name">${statusCell(e)}</td><td>${fmtBRL(e.total)}</td><td class="mono-name">${dateStr(e.ts)}</td></tr>`;
   }).join('') : `<tr><td colspan="5" class="cbf-empty">Nenhuma SEQ lançada ainda.</td></tr>`;
 
   return `
@@ -567,13 +600,12 @@ function renderAdmin(){
   filteredEntries = filteredEntries.slice(0,800);
 
   const logRows = filteredEntries.map(e=>{
-    const st = statusLabel(e.status, e.manual);
     return `<tr>
       <td class="mono-name">${escHtml(nomeDoVendedor(e.vcodigo))}</td>
       <td class="mono-name">${CATS[e.tipo] ? CATS[e.tipo].num : ''}</td>
       <td>${escHtml(e.seq)}</td>
       <td class="mono-name" title="${escAttr(e.item||'')}">${escHtml((e.item||'').slice(0,24))}${(e.item||'').length>24?'…':''}</td>
-      <td class="mono-name"><span class="cbf-pill ${st.cls}">${st.text}</span></td>
+      <td class="mono-name">${statusCell(e)}</td>
       <td>${fmtBRL(e.total)}</td>
       <td class="mono-name">${dateStr(e.ts)}</td>
       <td style="white-space:nowrap;">
@@ -645,8 +677,9 @@ function renderAdmin(){
 
     <div class="cbf-grid2">
       <div class="cbf-card">
-        <h3>Relatório de Vendas <span class="cbf-hint">(categorias 1 e 2)</span></h3>
-        <div class="cbf-hint">Importe o PDF direto (recomendado) ou cole o texto manualmente abaixo.</div>
+        <h3>Vendas com Desconto – Detalhado <span class="cbf-hint">(categorias 1 e 2)</span></h3>
+        <div class="cbf-hint"><b>IdealSoft:</b> Movimento → Relatório → Relatório de Vendas e Análise → Relatório de Vendas com Desconto (grupo de filiais = 3, layout = detalhado).</div>
+        <div class="cbf-hint">Importe o PDF direto (recomendado) ou cole o texto manualmente abaixo. Ao salvar, as SEQs do arquivo são mescladas e as anteriores ficam preservadas.</div>
         ${state.vendasPdfName ? `<div class="cbf-welcome-name" id="vendasPdfNameLabel" style="font-size:14px;margin:6px 0;">📄 ${escHtml(state.vendasPdfName)}</div>` : `<div class="cbf-welcome-name" id="vendasPdfNameLabel" style="font-size:14px;margin:6px 0;"></div>`}
         <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
           <input type="file" accept="application/pdf" id="vendasPdfInput" style="flex:1;min-width:160px;">
@@ -658,8 +691,9 @@ function renderAdmin(){
         <div style="margin-top:8px;"><button class="cbf-btn cbf-btn-primary" data-save="refVendas">Salvar</button></div>
       </div>
       <div class="cbf-card">
-        <h3>Relatório de Vendas CF <span class="cbf-hint">(categoria 3)</span></h3>
-        <div class="cbf-hint">Importe o PDF direto (recomendado) ou cole o texto manualmente abaixo.</div>
+        <h3>Saídas – Relatório Complete Frame <span class="cbf-hint">(categoria 3)</span></h3>
+        <div class="cbf-hint"><b>IdealSoft:</b> Movimento → Saídas → Saídas Complete Frame → Relatório Complete Frame.</div>
+        <div class="cbf-hint">Importe o PDF direto (recomendado) ou cole o texto manualmente abaixo. Ao salvar, as SEQs do arquivo são mescladas e as anteriores ficam preservadas.</div>
         ${state.cfPdfName ? `<div class="cbf-welcome-name" id="cfPdfNameLabel" style="font-size:14px;margin:6px 0;">📄 ${escHtml(state.cfPdfName)}</div>` : `<div class="cbf-welcome-name" id="cfPdfNameLabel" style="font-size:14px;margin:6px 0;"></div>`}
         <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
           <input type="file" accept="application/pdf" id="cfPdfInput" style="flex:1;min-width:160px;">
@@ -890,17 +924,19 @@ async function saveAdminField(field){
     ok = await replaceTable('sellers', 'codigo', state.sellers, 500);
     count = state.sellers.length; label = 'vendedores';
   } else if(field==='refVendas'){
-    state.refVendas = parseRefVendas(document.getElementById('refVendasText').value);
-    state.adminStatus = 'Salvando ' + state.refVendas.length + ' linhas, aguarde...'; render();
-    ok = await replaceTable('ref_vendas', 'id', state.refVendas, 500);
-    count = state.refVendas.length; label = 'linhas do relatório de Vendas';
-    if(ok){ state.refVendas = await fetchAllRows('ref_vendas'); await reconcileAll(); }
+    const novas = parseRefVendas(document.getElementById('refVendasText').value);
+    state.adminStatus = 'Mesclando ' + novas.length + ' linhas, aguarde...'; render();
+    ok = await mergeBySeq('ref_vendas', novas, 500);
+    count = novas.length; label = 'linhas do relatório de Vendas mescladas (SEQs anteriores preservadas)';
+    state.refVendas = await fetchAllRows('ref_vendas');
+    if(ok){ await reconcileAll(); }
   } else if(field==='refCF'){
-    state.refCF = parseRefCF(document.getElementById('refCFText').value);
-    state.adminStatus = 'Salvando ' + state.refCF.length + ' linhas, aguarde...'; render();
-    ok = await replaceTable('ref_cf', 'id', state.refCF, 500);
-    count = state.refCF.length; label = 'linhas do relatório CF';
-    if(ok){ state.refCF = await fetchAllRows('ref_cf', 'ordem'); await reconcileAll(); }
+    const novasCF = parseRefCF(document.getElementById('refCFText').value);
+    state.adminStatus = 'Mesclando ' + novasCF.length + ' linhas, aguarde...'; render();
+    ok = await mergeBySeq('ref_cf', novasCF, 500);
+    count = novasCF.length; label = 'linhas do relatório CF mescladas (SEQs anteriores preservadas)';
+    state.refCF = await fetchAllRows('ref_cf', 'ordem');
+    if(ok){ await reconcileAll(); }
   } else if(field==='bonusSku'){
     state.bonusSku = parseBonusSku(document.getElementById('bonusSkuText').value);
     state.adminStatus = 'Salvando...'; render();
@@ -1180,7 +1216,7 @@ async function approveEntry(id){
 function exportCSV(){
   const rows = [['Vendedor','Código','Categoria','SEQ','Item','Status','Detalhe','Valor','Data']];
   [...state.entries].sort((a,b)=>a.ts-b.ts).forEach(e=>{
-    rows.push([nomeDoVendedor(e.vcodigo), e.vcodigo, CATS[e.tipo]?CATS[e.tipo].label:e.tipo, e.seq, e.item||'', statusLabel(e.status, e.manual).text, (e.detalhes||[]).map(d=>d.ref).join(' | '), Number(e.total).toFixed(2).replace('.',','), new Date(e.ts).toLocaleDateString('pt-BR')]);
+    rows.push([nomeDoVendedor(e.vcodigo), e.vcodigo, CATS[e.tipo]?CATS[e.tipo].label:e.tipo, e.seq, e.item||'', statusLabel(e.status, e.manual).text, (e.detalhes||[]).map(d=>d.ref).join(' | ') + (e.note ? (((e.detalhes||[]).length?' | ':'') + 'Motivo: ' + e.note) : ''), Number(e.total).toFixed(2).replace('.',','), new Date(e.ts).toLocaleDateString('pt-BR')]);
   });
   const csv = rows.map(r=>r.map(c=>`"${(c??'').toString().replace(/"/g,'""')}"`).join(';')).join('\n');
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
